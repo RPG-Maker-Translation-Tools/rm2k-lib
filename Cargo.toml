@@ -1,0 +1,109 @@
+[package]
+name = "rm2k-lib"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.73.0"
+description = "Reads and writes the RPG Maker 2000/2003 LCF binary formats (LDB, LMU, LMT, LSD). no_std, zero-copy."
+repository = "https://github.com/savannstm/rm2k-lib"
+license-file = "LICENSE.md"
+keywords = ["rpgmaker", "lcf", "rpg2000", "parser", "no_std"]
+categories = ["parser-implementations", "no-std", "game-development"]
+readme = "README.md"
+
+[workspace]
+members = ["crates/rm2k-capi", "crates/rm2k-wasm"]
+
+[lib]
+name = "rm2k"
+
+[features]
+default = ["std"]
+# Tier 2: owning/typed data model. Pure marker feature.
+alloc = []
+# Tier 3: adds IoSink<W: io::Write>.
+std = ["alloc"]
+# Tier 4: Serialize/Deserialize for the whole data model.
+serde = ["alloc", "dep:serde"]
+
+[dependencies]
+serde = { version = "1.0.229", optional = true, default-features = false, features = [
+    "alloc",
+    "derive",
+] }
+thiserror = { version = "2.0.20", default-features = false }
+
+[dev-dependencies]
+criterion = "0.8.2"
+serde_json = { version = "1.0.151", default-features = false, features = [
+    "alloc",
+] }
+yaml_serde = "0.10.7"
+
+[[bench]]
+name = "database_load"
+harness = false
+required-features = ["std"]
+
+[[test]]
+name = "roundtrip"
+required-features = ["alloc"]
+
+[[test]]
+name = "core_tier"
+required-features = ["alloc"]
+
+[[test]]
+name = "serde_tier"
+required-features = ["serde"]
+
+[[test]]
+name = "wire"
+
+[[test]]
+name = "cursor"
+
+[[test]]
+name = "sink"
+
+[[test]]
+name = "event"
+
+[[test]]
+name = "field"
+required-features = ["alloc"]
+
+[[test]]
+name = "raw"
+required-features = ["alloc"]
+
+[[test]]
+name = "schema"
+required-features = ["alloc"]
+
+[[test]]
+name = "file"
+required-features = ["alloc"]
+
+[[test]]
+name = "owned"
+required-features = ["alloc"]
+
+[[test]]
+name = "setup"
+required-features = ["alloc"]
+
+[[test]]
+name = "treemap"
+required-features = ["alloc"]
+
+[[example]]
+name = "fixture_check"
+required-features = ["std"]
+
+[[example]]
+name = "dump_text"
+required-features = ["std"]
+
+[[example]]
+name = "to_yaml"
+required-features = ["std", "serde"]

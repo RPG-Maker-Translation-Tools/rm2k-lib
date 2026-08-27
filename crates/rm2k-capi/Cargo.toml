@@ -1,0 +1,43 @@
+[package]
+name = "rm2k-capi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.73.0"
+description = "C API for rm2k, buildable and installable with cargo-c."
+license-file = "../../LICENSE.md"
+publish = false
+
+[lib]
+name = "rm2k"
+crate-type = ["rlib", "cdylib", "staticlib"]
+doctest = false
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+
+[dependencies]
+rm2k = { package = "rm2k-lib", path = "../..", default-features = false, features = [
+    "alloc",
+] }
+
+[features]
+default = ["std"]
+std = ["rm2k/std"]
+capi = []
+
+[package.metadata.capi.header]
+name = "rm2k"
+subdirectory = false
+# Generation is disabled to not generate a header
+# using cbindgen, we provide a header ourselves
+generation = false
+
+[package.metadata.capi.pkg_config]
+name = "rm2k"
+filename = "rm2k"
+
+[package.metadata.capi.library]
+name = "rm2k"
