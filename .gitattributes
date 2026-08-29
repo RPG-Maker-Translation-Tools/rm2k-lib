@@ -1,0 +1,2 @@
+crates/rm2k-capi/**/*.c linguist-vendored
+crates/rm2k-capi/**/*.h linguist-vendored
