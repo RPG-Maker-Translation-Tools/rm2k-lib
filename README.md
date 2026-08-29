@@ -6,8 +6,8 @@ Round-trip correctness is verified byte-for-byte against real RPG Maker games - 
 
 This crate has some ports:
 
-- [C API](./crates/rpgmasd-capi/) - C bindings, installable via `cargo-c`.
-- [WASM](./crates/rpgmasd-wasm/) - WASM bindings generated from Rust code.
+- [C API](./crates/rm2k-capi/) - C bindings, installable via `cargo-c`.
+- [WASM](./crates/rm2k-wasm/) - WASM bindings generated from Rust code.
 
 ## Installation
 
