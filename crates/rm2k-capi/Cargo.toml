@@ -1,8 +1,9 @@
 [package]
 name = "rm2k-capi"
-version = "1.0.0"
-edition = "2021"
-rust-version = "1.73.0"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "C API for rm2k, buildable and installable with cargo-c."
 license-file = "../../LICENSE.md"
 publish = false

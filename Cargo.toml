@@ -3,6 +3,7 @@ name = "rm2k-lib"
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.73.0"
+authors = ["savannstm <savannstm@gmail.com>"]
 description = "Reads and writes the RPG Maker 2000/2003 LCF binary formats (LDB, LMU, LMT, LSD). no_std, zero-copy."
 repository = "https://github.com/savannstm/rm2k-lib"
 license-file = "LICENSE.md"
@@ -12,6 +13,12 @@ readme = "README.md"
 
 [workspace]
 members = ["crates/rm2k-capi", "crates/rm2k-wasm"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.73.0"
+authors = ["savannstm <savannstm@gmail.com>"]
 
 [lib]
 name = "rm2k"
