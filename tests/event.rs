@@ -133,6 +133,36 @@ fn declared_param_count_is_capped_to_what_is_actually_present() {
     assert_eq!(sink.as_slice()[0].kind, DiagKind::ShortChunk);
 }
 
+/// The partial case: some parameters are genuinely present, just fewer than declared. The fix
+/// must not lose or corrupt the ones that *are* there - only the excess the header falsely
+/// claimed.
+#[test]
+fn partially_available_params_are_kept_exactly() {
+    use rm2k::wire::write_varint;
+
+    let mut buf = Vec::new();
+    write_varint(&mut buf, 1).unwrap(); // code
+    write_varint(&mut buf, 0).unwrap(); // indent
+    write_varint(&mut buf, 0).unwrap(); // string length 0
+    write_varint(&mut buf, 1000).unwrap(); // declares 1000 parameters
+    write_varint(&mut buf, 7).unwrap();
+    write_varint(&mut buf, 8).unwrap();
+    write_varint(&mut buf, 9).unwrap();
+    // ...but only 3 are actually present; the buffer ends here, no 4th, no terminator.
+
+    let mut sink = NullSink;
+    let mut c = ctx(&mut sink);
+    let mut it = EventCommandIter::new(&buf, 0);
+    let cmd = it.next(&mut c).expect("a command header was present");
+
+    assert_eq!(cmd.param_count(), 3);
+    assert_eq!(cmd.params().collect::<Vec<_>>(), vec![7, 8, 9]);
+
+    // The list iterator must stop cleanly afterwards rather than looping or panicking on the
+    // now-exhausted buffer.
+    assert!(it.next(&mut c).is_none());
+}
+
 #[test]
 fn command_length_matches_what_was_decoded() {
     let mut sink = NullSink;
