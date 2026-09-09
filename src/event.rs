@@ -33,7 +33,10 @@ pub struct EventCommandRef<'a> {
     pub string: &'a [u8],
     /// The raw parameter bytes, decoded lazily by [`params`](EventCommandRef::params).
     params: &'a [u8],
-    /// How many parameters the header declared.
+    /// How many parameters are actually present in `params`. Not necessarily what the header
+    /// declared: a truncated/corrupted file can declare far more than the remaining bytes could
+    /// ever hold, so this is capped to how many were actually scanned out of the buffer (see
+    /// [`EventCommandIter::next`]) rather than trusted verbatim from the wire.
     param_count: u32,
 }
 
@@ -62,7 +65,9 @@ impl<'a> EventCommandRef<'a> {
         self.params().nth(index)
     }
 
-    /// How many parameters the command declares.
+    /// How many parameters are actually present (see [`EventCommandRef`]'s
+    /// `param_count` field docs — capped to what the buffer could actually hold,
+    /// not trusted verbatim from the header).
     #[must_use]
     #[inline]
     pub const fn param_count(&self) -> u32 {
@@ -174,11 +179,22 @@ impl<'a> EventCommandIter<'a> {
 
         // Parameters are compressed integers, so their extent has to be found by scanning. Doing
         // it once here keeps `ParamIter` a plain decode with no bounds bookkeeping.
+        //
+        // `param_count.value` is attacker-controlled and must not be trusted verbatim: a
+        // corrupted/truncated file can declare far more parameters than the remaining bytes could
+        // ever hold. `ParamIter` implements `ExactSizeIterator` off of this count, so a caller
+        // doing `.collect::<Vec<_>>()` (or anything else that pre-reserves off `size_hint`) would
+        // otherwise try to allocate for the declared count before reading a single parameter -
+        // this loop already knows the *actual* count (it stops the moment `varint()` runs out of
+        // data), so track that instead of the raw header value.
         let params_start = self.cur.pos();
+        let mut actual_count = 0u32;
         for _ in 0..param_count.value {
             if self.cur.varint().is_none() {
+                ctx.report("EventCommand", 0, self.cur.offset(), DiagKind::ShortChunk);
                 break;
             }
+            actual_count += 1;
         }
         let params_end = self.cur.pos();
         let params = self.cur.buf().get(params_start..params_end).unwrap_or(&[]);
@@ -188,7 +204,7 @@ impl<'a> EventCommandIter<'a> {
             indent: indent.value as i32,
             string,
             params,
-            param_count: param_count.value,
+            param_count: actual_count,
         })
     }
 

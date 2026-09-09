@@ -101,6 +101,38 @@ fn move_command_payloads_follow_the_code() {
     assert!(it.next(&mut c).is_none());
 }
 
+/// A command that declares far more parameters than the buffer could ever hold must not report
+/// the declared count verbatim - `ParamIter` is an `ExactSizeIterator` built off `param_count()`,
+/// so trusting the header would let a `.collect::<Vec<_>>()` (or anything else that pre-reserves
+/// off `size_hint`) try to allocate for the declared count before reading a single parameter.
+#[test]
+fn declared_param_count_is_capped_to_what_is_actually_present() {
+    use rm2k::wire::write_varint;
+
+    let mut buf = Vec::new();
+    write_varint(&mut buf, 1).unwrap(); // code
+    write_varint(&mut buf, 0).unwrap(); // indent
+    write_varint(&mut buf, 0).unwrap(); // string length 0
+    write_varint(&mut buf, u32::MAX).unwrap(); // declared param count: as hostile as it gets
+    // No parameter bytes follow at all - the buffer ends right here, no terminator either.
+
+    let mut slots = [Diagnostic::EMPTY; 2];
+    let mut sink = SliceSink::new(&mut slots);
+    let (param_count, params_len) = {
+        let mut c = Ctx::new(Engine::R2K, &mut sink);
+        let mut it = EventCommandIter::new(&buf, 0);
+        let cmd = it.next(&mut c).expect("a command header was present");
+        (cmd.param_count(), cmd.params().count())
+    };
+
+    assert_eq!(
+        param_count, 0,
+        "no parameter bytes were available, so the actual count must be 0, not u32::MAX"
+    );
+    assert_eq!(params_len, 0, "iterating must agree with param_count()");
+    assert_eq!(sink.as_slice()[0].kind, DiagKind::ShortChunk);
+}
+
 #[test]
 fn command_length_matches_what_was_decoded() {
     let mut sink = NullSink;
