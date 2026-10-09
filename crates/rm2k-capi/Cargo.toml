@@ -4,30 +4,12 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "C API for rm2k, buildable and installable with cargo-c."
-license-file = "../../LICENSE.md"
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/tree/master/crates/rm2k-capi"
 publish = false
-
-[lib]
-name = "rm2k"
-crate-type = ["rlib", "cdylib", "staticlib"]
-doctest = false
-
-[profile.release]
-panic = "abort"
-
-[profile.dev]
-panic = "abort"
-
-[dependencies]
-rm2k = { package = "rm2k-lib", path = "../..", default-features = false, features = [
-    "alloc",
-] }
-
-[features]
-default = ["std"]
-std = ["rm2k/std"]
-capi = []
 
 [package.metadata.capi.header]
 name = "rm2k"
@@ -42,3 +24,18 @@ filename = "rm2k"
 
 [package.metadata.capi.library]
 name = "rm2k"
+
+[lib]
+name = "rm2k"
+crate-type = ["rlib", "cdylib", "staticlib"]
+doctest = false
+
+[features]
+default = ["std"]
+std = ["rm2k/std"]
+capi = []
+
+[dependencies]
+rm2k = { package = "rm2k-lib", path = "../..", default-features = false, features = [
+    "alloc",
+] }

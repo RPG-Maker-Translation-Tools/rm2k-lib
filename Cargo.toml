@@ -1,24 +1,38 @@
 [package]
 name = "rm2k-lib"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
-rust-version = "1.73.0"
+rust-version = "1.77.0"
 authors = ["savannstm <savannstm@gmail.com>"]
-description = "Reads and writes the RPG Maker 2000/2003 LCF binary formats (LDB, LMU, LMT, LSD). no_std, zero-copy."
-repository = "https://github.com/savannstm/rm2k-lib"
-license-file = "LICENSE.md"
+description = "Reads and writes the RPG Maker 2000/2003 LCF binary formats (LDB, LMU, LMT, LSD)."
+repository = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib"
+homepage = "https://crates.io/crates/rm2k-lib"
+documentation = "https://docs.rs/rm2k-lib/"
+license = "WTFPL"
 keywords = ["rpgmaker", "lcf", "rpg2000", "parser", "no_std"]
 categories = ["parser-implementations", "no-std", "game-development"]
 readme = "README.md"
+exclude = [
+    "/.gitignore",
+    "/.gitattributes",
+    "/.clang-format",
+    "/.clang-tidy",
+    "/rustfmt.toml",
+    "/benches",
+]
 
 [workspace]
 members = ["crates/rm2k-capi", "crates/rm2k-wasm"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
-rust-version = "1.73.0"
+rust-version = "1.77.0"
 authors = ["savannstm <savannstm@gmail.com>"]
+description = "Reads and writes the RPG Maker 2000/2003 LCF binary formats (LDB, LMU, LMT, LSD)."
+license = "WTFPL"
+repository = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib"
+homepage = "https://crates.io/crates/rm2k-lib"
 
 [lib]
 name = "rm2k"
@@ -37,7 +51,7 @@ serde = { version = "1.0.229", optional = true, default-features = false, featur
     "alloc",
     "derive",
 ] }
-thiserror = { version = "2.0.20", default-features = false }
+thiserror = { version = "2.0.21", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8.2"

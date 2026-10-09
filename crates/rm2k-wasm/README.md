@@ -1,8 +1,8 @@
 # rm2k-wasm
 
-WebAssembly bindings for [`rm2k-lib`](https://github.com/savannstm/rm2k-lib), which reads and writes the RPG Maker 2000/2003 LCF binary formats, generated via [`wasm-bindgen`](https://github.com/wasm-bindgen/wasm-bindgen).
+WebAssembly bindings for [`rm2k-lib`](https://github.com/RPG-Maker-Translation-Tools/rm2k-lib), which reads and writes the RPG Maker 2000/2003 LCF binary formats, generated via [`wasm-bindgen`](https://github.com/wasm-bindgen/wasm-bindgen).
 
-The domain model (`Database`, `Map`, `Save`, `TreeMap` and everything nested under them) is close to a hundred structs, so it is not individually wrapped. Instead, loaded values cross the JS boundary as plain JavaScript values via [`serde-wasm-bindgen`](https://github.com/RReverser/serde-wasm-bindgen), reusing `rm2k-lib`'s own `serde` feature. `value` is therefore untyped (`any`) on the TypeScript side by design - treat it as the same object shape you'd get from `rm2k`'s own `serde_json` output, documented in the [root crate's README](https://github.com/savannstm/rm2k-lib#readme).
+The domain model (`Database`, `Map`, `Save`, `TreeMap` and everything nested under them) is close to a hundred structs, so it is not individually wrapped. Instead, loaded values cross the JS boundary as plain JavaScript values via [`serde-wasm-bindgen`](https://github.com/RReverser/serde-wasm-bindgen), reusing `rm2k-lib`'s own `serde` feature. `value` is therefore untyped (`any`) on the TypeScript side by design - treat it as the same object shape you'd get from `rm2k`'s own `serde_json` output, documented in the [root crate's README](https://github.com/RPG-Maker-Translation-Tools/rm2k-lib#readme).
 
 ## Install
 
@@ -14,25 +14,48 @@ npm install rm2k-wasm
 
 ```ts
 class LoadResult {
-    value: any;
-    header: Uint8Array;
-    // Diagnostic[]-shaped: { offset: number, chunkId: number, structName: string, kind: string }
-    diagnostics: any;
+  value: any;
+  header: Uint8Array;
+  // Diagnostic[]-shaped: { offset: number, chunkId: number, structName: string, kind: string }
+  diagnostics: any;
 }
 
-enum Engine { R2K, R2K3 }
+enum Engine {
+  R2K,
+  R2K3,
+}
 
 function loadDatabase(bytes: Uint8Array): LoadResult;
-function saveDatabase(value: any, engine: Engine, preserveHeader: boolean, header: Uint8Array): Uint8Array;
+function saveDatabase(
+  value: any,
+  engine: Engine,
+  preserveHeader: boolean,
+  header: Uint8Array,
+): Uint8Array;
 
 function loadMap(bytes: Uint8Array): LoadResult;
-function saveMap(value: any, engine: Engine, preserveHeader: boolean, header: Uint8Array): Uint8Array;
+function saveMap(
+  value: any,
+  engine: Engine,
+  preserveHeader: boolean,
+  header: Uint8Array,
+): Uint8Array;
 
 function loadSave(bytes: Uint8Array): LoadResult;
-function saveSave(value: any, engine: Engine, preserveHeader: boolean, header: Uint8Array): Uint8Array;
+function saveSave(
+  value: any,
+  engine: Engine,
+  preserveHeader: boolean,
+  header: Uint8Array,
+): Uint8Array;
 
 function loadTreeMap(bytes: Uint8Array): LoadResult;
-function saveTreeMap(value: any, engine: Engine, preserveHeader: boolean, header: Uint8Array): Uint8Array;
+function saveTreeMap(
+  value: any,
+  engine: Engine,
+  preserveHeader: boolean,
+  header: Uint8Array,
+): Uint8Array;
 ```
 
 Every `loadX` call always collects recoverable parse diagnostics (see the root crate's "Leniency" docs) rather than silently discarding them - `diagnostics` is usually an empty array. `header` is the file's original magic bytes; pass it back into `saveX` with `preserveHeader: true` to keep a non-canonical header byte-exact. `Engine` picks which RPG Maker's field layout to write, since R2K and R2K3 diverge on a handful of structs.
@@ -59,7 +82,9 @@ import { readFile } from "node:fs/promises";
 import init, { loadDatabase } from "rm2k-wasm";
 
 await init(
-  await readFile(new URL("./rm2k_wasm_bg.wasm", import.meta.resolve("rm2k-wasm"))),
+  await readFile(
+    new URL("./rm2k_wasm_bg.wasm", import.meta.resolve("rm2k-wasm")),
+  ),
 );
 ```
 
@@ -77,4 +102,4 @@ Requires the `wasm32-unknown-unknown` rustup target (`rustup target add wasm32-u
 wasm-pack test --node
 ```
 
-Exercises the `serde-wasm-bindgen` conversion boundary against synthetic, guaranteed-valid values (`Setup::defaults`) rather than a real game file - see [`tests/smoke.rs`](https://github.com/savannstm/rm2k-lib/blob/master/crates/rm2k-wasm/tests/smoke.rs).
+Exercises the `serde-wasm-bindgen` conversion boundary against synthetic, guaranteed-valid values (`Setup::defaults`) rather than a real game file - see [`tests/smoke.rs`](https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/blob/master/crates/rm2k-wasm/tests/smoke.rs).

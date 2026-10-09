@@ -4,12 +4,16 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "WASM bindings for rm2k-lib: reads and writes the RPG Maker 2000/2003 LCF binary formats."
-repository = "https://github.com/savannstm/rm2k-lib"
-documentation = "https://github.com/savannstm/rm2k-lib/tree/master/crates/rm2k-wasm"
-license-file = "LICENSE.md"
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/tree/master/crates/rm2k-wasm"
 keywords = ["rpgmaker", "lcf", "rpg2000", "wasm", "parser"]
 publish = false
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -22,10 +26,7 @@ rm2k = { package = "rm2k-lib", path = "../..", default-features = false, feature
 ] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
-wasm-bindgen = "=0.2.127"
+wasm-bindgen = "=0.2.129"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.77"
-
-[package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O", "--enable-bulk-memory"]
