@@ -3,6 +3,7 @@
 //! borrowed data (a `JsValue` has no linear-memory-backed byte slice to borrow from), so every
 //! `DbStr` deserializes into owned bytes regardless of lifetime. That means, unlike the C API,
 //! this crate needs no `IntoOwned`/handle machinery at all.
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 
 use rm2k::Diagnostic;
 use wasm_bindgen::prelude::*;

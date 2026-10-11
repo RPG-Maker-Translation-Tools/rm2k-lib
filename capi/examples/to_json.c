@@ -1,4 +1,4 @@
-#include "../assets/rm2k.h"
+#include "rm2k.h"
 #include "yyjson/yyjson.h"
 
 #include <stdio.h>
@@ -95,9 +95,9 @@ static const char* const LIST_NAMES[] = {
     "classes", "animations", "chipsets", "terrains", "attributes", "commonEvents",
 };
 static const Rm2kDbList LIST_IDS[] = {
-    RM2K_LIST_ACTORS,   RM2K_LIST_SKILLS,   RM2K_LIST_ITEMS,      RM2K_LIST_ENEMIES,
-    RM2K_LIST_TROOPS,   RM2K_LIST_STATES,   RM2K_LIST_CLASSES,    RM2K_LIST_ANIMATIONS,
-    RM2K_LIST_CHIPSETS, RM2K_LIST_TERRAINS, RM2K_LIST_ATTRIBUTES, RM2K_LIST_COMMON_EVENTS,
+    RM2K_DB_LIST_ACTORS,   RM2K_DB_LIST_SKILLS,   RM2K_DB_LIST_ITEMS,      RM2K_DB_LIST_ENEMIES,
+    RM2K_DB_LIST_TROOPS,   RM2K_DB_LIST_STATES,   RM2K_DB_LIST_CLASSES,    RM2K_DB_LIST_ANIMATIONS,
+    RM2K_DB_LIST_CHIPSETS, RM2K_DB_LIST_TERRAINS, RM2K_DB_LIST_ATTRIBUTES, RM2K_DB_LIST_COMMON_EVENTS,
 };
 #define LIST_COUNT (sizeof(LIST_IDS) / sizeof(LIST_IDS[0]))
 
@@ -106,7 +106,7 @@ static yyjson_mut_doc* build_database_json(const Rm2kDatabase* db) {
     yyjson_mut_val* root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);
 
-    yyjson_mut_obj_add_str(doc, root, "engine", rm2k_database_engine(db) == RM2K_ENGINE_2K3 ? "2k3" : "2k");
+    yyjson_mut_obj_add_str(doc, root, "engine", rm2k_database_engine(db) == RM2K_ENGINE_R2K3 ? "2k3" : "2k");
     add_bytes(doc, root, "header", rm2k_database_header(db));
 
     yyjson_mut_val* lists = yyjson_mut_obj(doc);
@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
     }
 
     Rm2kDiagnostics* diagnostics = rm2k_diagnostics_new();
-    Rm2kError error = RM2K_OK;
+    Rm2kError error = RM2K_ERROR_OK;
     Rm2kDatabase* db = rm2k_database_load(data, len, diagnostics, &error);
     free(data);
 

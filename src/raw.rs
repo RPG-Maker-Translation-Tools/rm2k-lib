@@ -1,4 +1,6 @@
-//! Codecs for the handful of types that do not fit the chunked-struct shape: fixed-layout structs
+//! Codecs for the handful of types that do not fit the chunked-struct shape.
+//!
+//! These are fixed-layout structs
 //! with no chunk framing at all ([`Rect`], [`Equipment`], [`Parameters`]), and a few field kinds
 //! whose encoding is too irregular for the schema macro ([`EventCommandList`],
 //! [`MoveCommandList`], [`StrList`], [`EmptyBlock`], [`DatabaseVersion`]).

@@ -1,22 +1,15 @@
 [package]
 name = "rm2k-capi"
 version.workspace = true
-authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
 license.workspace = true
-repository.workspace = true
-homepage.workspace = true
-documentation = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/tree/master/crates/rm2k-capi"
 publish = false
 
 [package.metadata.capi.header]
 name = "rm2k"
 subdirectory = false
-# Generation is disabled to not generate a header
-# using cbindgen, we provide a header ourselves
-generation = false
 
 [package.metadata.capi.pkg_config]
 name = "rm2k"
@@ -27,7 +20,7 @@ name = "rm2k"
 
 [lib]
 name = "rm2k"
-crate-type = ["rlib", "cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib"]
 doctest = false
 
 [features]
@@ -36,6 +29,6 @@ std = ["rm2k/std"]
 capi = []
 
 [dependencies]
-rm2k = { package = "rm2k-lib", path = "../..", default-features = false, features = [
+rm2k = { package = "rm2k-lib", path = "..", default-features = false, features = [
     "alloc",
 ] }

@@ -2,16 +2,11 @@
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![allow(
-    clippy::too_long_first_doc_paragraph,
-    clippy::use_self,
-    clippy::doc_markdown,
     clippy::wildcard_imports,
-    clippy::module_name_repetitions,
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
-    clippy::single_match_else,
-    clippy::float_cmp
+    clippy::single_match_else
 )]
 #![doc = include_str!("../README.md")]
 

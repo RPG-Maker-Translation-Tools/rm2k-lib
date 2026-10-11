@@ -1,0 +1,50 @@
+[package]
+name = "rm2k-lib-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rm2k-lib = { path = ".." }
+
+[workspace]
+[[bin]]
+name = "ldb"
+path = "fuzz_targets/ldb.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lmu"
+path = "fuzz_targets/lmu.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lsd"
+path = "fuzz_targets/lsd.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lmt"
+path = "fuzz_targets/lmt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "events"
+path = "fuzz_targets/events.rs"
+test = false
+doc = false
+bench = false
+
+

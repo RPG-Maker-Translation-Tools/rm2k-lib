@@ -1,14 +1,14 @@
 [package]
 name = "rm2k-lib"
-version = "1.0.1"
-edition = "2021"
-rust-version = "1.77.0"
-authors = ["savannstm <savannstm@gmail.com>"]
-description = "Reads and writes the RPG Maker 2000/2003 LCF binary formats (LDB, LMU, LMT, LSD)."
-repository = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib"
-homepage = "https://crates.io/crates/rm2k-lib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/rm2k-lib/"
-license = "WTFPL"
+license.workspace = true
 keywords = ["rpgmaker", "lcf", "rpg2000", "parser", "no_std"]
 categories = ["parser-implementations", "no-std", "game-development"]
 readme = "README.md"
@@ -22,10 +22,10 @@ exclude = [
 ]
 
 [workspace]
-members = ["crates/rm2k-capi", "crates/rm2k-wasm"]
+members = ["capi", "wasm"]
 
 [workspace.package]
-version = "1.0.1"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.77.0"
 authors = ["savannstm <savannstm@gmail.com>"]
@@ -55,7 +55,7 @@ thiserror = { version = "2.0.21", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8.2"
-serde_json = { version = "1.0.151", default-features = false, features = [
+serde_json = { version = "1.0.154", default-features = false, features = [
     "alloc",
 ] }
 yaml_serde = "0.10.7"

@@ -3,12 +3,12 @@ name = "rm2k-wasm"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+rust-version = "1.81.0"
 description.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/tree/master/crates/rm2k-wasm"
+documentation = "https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/tree/master/wasm"
 keywords = ["rpgmaker", "lcf", "rpg2000", "wasm", "parser"]
 publish = false
 
@@ -20,7 +20,7 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
-rm2k = { package = "rm2k-lib", path = "../..", default-features = false, features = [
+rm2k = { package = "rm2k-lib", path = "..", default-features = false, features = [
     "alloc",
     "serde",
 ] }
@@ -29,4 +29,4 @@ serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "=0.2.129"
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3.77"
+wasm-bindgen-test = "0.3.79"

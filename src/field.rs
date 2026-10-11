@@ -186,6 +186,19 @@ pub trait LcfField<'a>: Sized {
     /// Encoded length in bytes, which the two-pass writer emits as the chunk's length prefix.
     fn lcf_size(&self, engine: Engine) -> u32;
 
+    /// Whether `self` would be written differently from `other`, which is how the writer decides to
+    /// elide a field equal to its default.
+    ///
+    /// Plain `!=` except for floats, which compare by bits: `-0.0 == 0.0`, so `!=` would drop a
+    /// stored `-0.0` and break the byte-for-byte round trip.
+    #[inline]
+    fn lcf_differs(&self, other: &Self) -> bool
+    where
+        Self: PartialEq,
+    {
+        self != other
+    }
+
     /// Number of elements, for array-like fields.
     ///
     /// Consulted only by companion `count`/`size` chunks and by their elision test.
@@ -289,6 +302,11 @@ macro_rules! impl_fixed_field {
             }
 
             #[inline]
+            fn lcf_differs(&self, other: &Self) -> bool {
+                self.to_le_bytes() != other.to_le_bytes()
+            }
+
+            #[inline]
             fn write<S: Sink>(&self, sink: &mut S, _engine: Engine) -> Result<(), S::Error> {
                 sink.write(&self.to_le_bytes())
             }
@@ -336,7 +354,7 @@ impl<'a> LcfField<'a> for i8 {
 
     #[inline]
     fn read(data: &'a [u8], ctx: &mut Ctx<'_>, owner: &'static str, id: u32) -> Self {
-        <u8 as LcfField>::read(data, ctx, owner, id) as i8
+        <u8 as LcfField>::read(data, ctx, owner, id) as Self
     }
 
     #[inline]
@@ -439,7 +457,7 @@ impl PackedPrim for i16 {
     const SIZE: usize = 2;
     #[inline]
     fn decode(bytes: &[u8]) -> Self {
-        i16::from_le_bytes([bytes[0], bytes[1]])
+        Self::from_le_bytes([bytes[0], bytes[1]])
     }
     #[inline]
     fn encode(self, out: &mut [u8; 8]) -> usize {
@@ -452,7 +470,7 @@ impl PackedPrim for i32 {
     const SIZE: usize = 4;
     #[inline]
     fn decode(bytes: &[u8]) -> Self {
-        i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+        Self::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
     }
     #[inline]
     fn encode(self, out: &mut [u8; 8]) -> usize {
@@ -465,7 +483,7 @@ impl PackedPrim for u32 {
     const SIZE: usize = 4;
     #[inline]
     fn decode(bytes: &[u8]) -> Self {
-        u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+        Self::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
     }
     #[inline]
     fn encode(self, out: &mut [u8; 8]) -> usize {

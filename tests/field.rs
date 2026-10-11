@@ -77,3 +77,12 @@ fn ragged_packed_array_is_truncated_and_reported() {
     assert_eq!(&a.0, &[1]);
     assert_eq!(sink.as_slice()[0].kind, DiagKind::RaggedArray);
 }
+
+#[test]
+fn float_default_elision_compares_bits() {
+    // `-0.0 == 0.0`, but the two encode differently; eliding the field would lose the sign.
+    assert!(<f64 as LcfField>::lcf_differs(&-0.0, &0.0));
+    assert!(!<f64 as LcfField>::lcf_differs(&1.5, &1.5));
+    assert!(<i32 as LcfField>::lcf_differs(&1, &0));
+    assert!(!<i32 as LcfField>::lcf_differs(&7, &7));
+}

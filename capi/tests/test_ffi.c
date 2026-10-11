@@ -1,4 +1,4 @@
-#include "../assets/rm2k.h"
+#include "rm2k.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,9 +44,9 @@ static uint8_t* read_file(const char* path, size_t* out_len) {
  */
 
 static void test_null_arguments_are_rejected(void) {
-    Rm2kError err = RM2K_OK;
+    Rm2kError err = RM2K_ERROR_OK;
     CHECK(rm2k_database_load(NULL, 0, NULL, &err) == NULL);
-    CHECK(err == RM2K_ERR_NULL_ARGUMENT);
+    CHECK(err == RM2K_ERROR_NULL_ARGUMENT);
 
     /* Every free must tolerate NULL. */
     rm2k_database_free(NULL);
@@ -62,9 +62,9 @@ static void test_null_arguments_are_rejected(void) {
 
 static void test_truncated_input_is_an_error_not_a_crash(void) {
     const uint8_t empty[1] = { 0 };
-    Rm2kError err = RM2K_OK;
+    Rm2kError err = RM2K_ERROR_OK;
     CHECK(rm2k_database_load(empty, 0, NULL, &err) == NULL);
-    CHECK(err == RM2K_ERR_UNEXPECTED_EOF);
+    CHECK(err == RM2K_ERROR_UNEXPECTED_EOF);
 }
 
 static void test_diagnostic_names(void) {
@@ -95,10 +95,10 @@ static void test_database_round_trip(const char* path) {
     }
 
     Rm2kDiagnostics* diag = rm2k_diagnostics_new();
-    Rm2kError err = RM2K_OK;
+    Rm2kError err = RM2K_ERROR_OK;
     Rm2kDatabase* db = rm2k_database_load(bytes, len, diag, &err);
     CHECK(db != NULL);
-    CHECK(err == RM2K_OK);
+    CHECK(err == RM2K_ERROR_OK);
     if (!db) {
         free(bytes);
         rm2k_diagnostics_free(diag);
@@ -112,14 +112,14 @@ static void test_database_round_trip(const char* path) {
     CHECK(memcmp(header.data, "LcfDataBase", 11) == 0);
 
     /* Actor names come back as raw bytes. */
-    size_t actors = rm2k_database_list_len(db, RM2K_LIST_ACTORS);
-    printf("  %zu actors, engine %s\n", actors, rm2k_database_engine(db) == RM2K_ENGINE_2K3 ? "2003" : "2000");
+    size_t actors = rm2k_database_list_len(db, RM2K_DB_LIST_ACTORS);
+    printf("  %zu actors, engine %s\n", actors, rm2k_database_engine(db) == RM2K_ENGINE_R2K3 ? "2003" : "2000");
     CHECK(actors > 0);
 
     Rm2kNamed first;
-    CHECK(rm2k_database_list_get(db, RM2K_LIST_ACTORS, 0, &first));
+    CHECK(rm2k_database_list_get(db, RM2K_DB_LIST_ACTORS, 0, &first));
     printf("  actor[0] id=%d name=\"%.*s\"\n", first.id, (int)first.name.len, first.name.data);
-    CHECK(!rm2k_database_list_get(db, RM2K_LIST_ACTORS, actors, &first));
+    CHECK(!rm2k_database_list_get(db, RM2K_DB_LIST_ACTORS, actors, &first));
 
     /* Round-trip must be byte-exact. */
     size_t out_len = 0;
@@ -155,7 +155,7 @@ static void test_zero_copy_walk(const char* path) {
     CHECK(memcmp(header.data, "LcfMapUnit", 10) == 0);
 
     Rm2kCommandLists lists;
-    CHECK(rm2k_command_lists_init(&lists, RM2K_SCOPE_MAP_EVENTS, body.data, body.len, 0, NULL));
+    CHECK(rm2k_command_lists_init(&lists, RM2K_EVENT_SCOPE_MAP_EVENTS, body.data, body.len, 0, NULL));
 
     size_t list_count = 0, command_count = 0, message_count = 0;
     Rm2kCommandList list;

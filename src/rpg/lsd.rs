@@ -1,6 +1,6 @@
 //! `LSD` structures.
 
-#![allow(clippy::struct_excessive_bools, clippy::doc_markdown)]
+#![allow(clippy::struct_excessive_bools)]
 
 use super::{enums::*, *};
 use crate::{

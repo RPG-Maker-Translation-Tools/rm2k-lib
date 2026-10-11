@@ -272,7 +272,7 @@ macro_rules! lcf_struct {
 
                             let force = false
                                 $( || $crate::lcf_struct!(@force engine, $flag $(= $fval)?) )*;
-                            if force || self.$fname != fdefault {
+                            if force || $crate::field::LcfField::lcf_differs(&self.$fname, &fdefault) {
                                 let len =
                                     $crate::field::LcfField::lcf_size(&self.$fname, engine);
                                 $crate::wire::write_varint(sink, $id)?;

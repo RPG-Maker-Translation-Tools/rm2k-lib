@@ -33,7 +33,8 @@ pub struct EventCommandRef<'a> {
     pub string: &'a [u8],
     /// The raw parameter bytes, decoded lazily by [`params`](EventCommandRef::params).
     params: &'a [u8],
-    /// How many parameters the header declared.
+    /// How many parameters are actually in `params`: the header's count, or fewer if the payload
+    /// ran out first.
     param_count: u32,
 }
 
@@ -62,7 +63,10 @@ impl<'a> EventCommandRef<'a> {
         self.params().nth(index)
     }
 
-    /// How many parameters the command declares.
+    /// How many parameters the command holds. A command whose header declares more than the
+    /// payload has room for reports only the ones present (and a
+    /// [`DiagKind::ShortChunk`](crate::diag::DiagKind::ShortChunk)), so this is always safe to
+    /// size a buffer from.
     #[must_use]
     #[inline]
     pub const fn param_count(&self) -> u32 {
@@ -97,7 +101,8 @@ impl Iterator for ParamIter<'_> {
             return None;
         }
         self.left -= 1;
-        // A truncated tail yields 0
+        // `left` never exceeds what the payload holds (see `EventCommandIter::next`), so the
+        // varint is always there.
         Some(self.cur.varint().map_or(0, |v| v.value as i32))
     }
 
@@ -174,11 +179,18 @@ impl<'a> EventCommandIter<'a> {
 
         // Parameters are compressed integers, so their extent has to be found by scanning. Doing
         // it once here keeps `ParamIter` a plain decode with no bounds bookkeeping.
+        //
+        // The count is the file's claim: a command can declare billions of parameters
+        // in a few bytes, and `ParamIter` is exact-size, so a caller that collects it would try to
+        // allocate for all of them. Only the parameters actually present are counted.
         let params_start = self.cur.pos();
-        for _ in 0..param_count.value {
+        let mut present = 0;
+        while present < param_count.value {
             if self.cur.varint().is_none() {
+                ctx.report("EventCommand", 0, offset, DiagKind::ShortChunk);
                 break;
             }
+            present += 1;
         }
         let params_end = self.cur.pos();
         let params = self.cur.buf().get(params_start..params_end).unwrap_or(&[]);
@@ -188,7 +200,7 @@ impl<'a> EventCommandIter<'a> {
             indent: indent.value as i32,
             string,
             params,
-            param_count: param_count.value,
+            param_count: present,
         })
     }
 

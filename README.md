@@ -6,8 +6,8 @@ Round-trip correctness is verified byte-for-byte against real RPG Maker games - 
 
 This crate has some ports:
 
-- [C API](./crates/rm2k-capi/) - C bindings, installable via `cargo-c`.
-- [WASM](./crates/rm2k-wasm/) - WASM bindings generated from Rust code.
+- [C API](./capi/) - C bindings, installable via `cargo-c`.
+- [WASM](./wasm/) - WASM bindings generated from Rust code.
 
 ## Installation
 
@@ -57,13 +57,13 @@ Real files are frequently malformed and RPG Maker itself loads them anyway, so t
 | [`examples/fixture_check.rs`](examples/fixture_check.rs)                     | Byte-exact round-trip checking against real game files on disk.                                                                                                                |
 | [`examples/dump_text.rs`](examples/dump_text.rs)                             | Extracting every displayed string using only the allocation-free core tier.                                                                                                    |
 | [`examples/to_yaml.rs`](examples/to_yaml.rs)                                 | Converting a database to YAML with the `serde` tier (`cargo run --example to_yaml --features serde -- game.ldb`).                                                              |
-| [`crates/rm2k-capi/examples/to_json.c`](crates/rm2k-capi/examples/to_json.c) | Converting a database's named lists to JSON from C (via [yyjson](https://github.com/ibireme/yyjson), vendored next to the example), using only the C API's owned/"alloc" tier. |
+| [`capi/examples/to_json.c`](capi/examples/to_json.c) | Converting a database's named lists to JSON from C (via [yyjson](https://github.com/ibireme/yyjson), vendored next to the example), using only the C API's owned/"alloc" tier. |
 
-Each example has its own README with usage, output semantics, and (for the C ones) build steps: [`examples/README.md`](examples/README.md) for the Rust examples, [`crates/rm2k-capi/examples/README.md`](crates/rm2k-capi/examples/README.md) for `to_json.c`. Run a Rust example with `cargo run --release --example <name> [--features ...] -- <args>`; the C example is not wired into Cargo.
+Each example has its own README with usage, output semantics, and (for the C ones) build steps: [`examples/README.md`](examples/README.md) for the Rust examples, [`capi/examples/README.md`](capi/examples/README.md) for `to_json.c`. Run a Rust example with `cargo run --release --example <name> [--features ...] -- <args>`; the C example is not wired into Cargo.
 
 ## Verification
 
-[`examples/fixture_check.rs`](examples/fixture_check.rs) ([usage](examples/README.md)) loads every `.ldb`/`.lmu`/`.lmt`/`.lsd` file in a directory, writes it straight back out, and compares bytes. Run against three real, unmodified RPG Maker games (RPG Maker 2000 and 2003, 419 files across all four formats): **419/419 byte-exact, zero diagnostics**. The C API gets the same treatment independently in [`crates/rm2k-capi/tests/test_ffi.c`](crates/rm2k-capi/tests/test_ffi.c) ([build steps](crates/rm2k-capi/tests/README.md)), round-tripping a real 262 KB database through the FFI boundary byte-for-byte.
+[`examples/fixture_check.rs`](examples/fixture_check.rs) ([usage](examples/README.md)) loads every `.ldb`/`.lmu`/`.lmt`/`.lsd` file in a directory, writes it straight back out, and compares bytes. Run against three real, unmodified RPG Maker games (RPG Maker 2000 and 2003, 419 files across all four formats): **419/419 byte-exact, zero diagnostics**. The C API gets the same treatment independently in [`capi/tests/test_ffi.c`](capi/tests/test_ffi.c) ([build steps](capi/tests/README.md)), round-tripping a real 262 KB database through the FFI boundary byte-for-byte.
 
 The games in question:
 
@@ -83,9 +83,9 @@ The games in question:
 
 ## Acknowledgements
 
-Most of the RPG Maker 2k/3 format handling was written referencing [liblcf](https://github.com/EasyRPG/liblcf), a part of the EasyRPG project, a MIT-licensed library. However, the implementation that handles the format itself is very different from `liblcf`, both because Rust enforces different idioms and because the logic was made with free-standing usage in mind. Credit to the [EasyRPG](https://easyrpg.org) project for that work.
+Most of the RPG Maker 2k/3 format handling was written referencing [liblcf](https://github.com/EasyRPG/liblcf), a part of the EasyRPG project, a [MIT-licensed](./COPYING-liblcf) library. However, the implementation that handles the format itself is very different from `liblcf`, both because Rust enforces different idioms and because the logic was made with free-standing usage in mind. This work wouldn't be possible without them.
 
-[yyjson](https://github.com/ibireme/yyjson) (`yyjson.h`/`yyjson.c`, MIT licensed) is vendored in [`crates/rm2k-capi/examples/yyjson`](crates/rm2k-capi/examples) for the `to_json.c` example, its license is alongside it.
+[yyjson](https://github.com/ibireme/yyjson) (`yyjson.h`/`yyjson.c`, MIT licensed) is vendored in [`capi/examples/yyjson`](capi/examples) for the `to_json.c` example, its license is alongside it.
 
 ## Support
 
@@ -93,11 +93,10 @@ Most of the RPG Maker 2k/3 format handling was written referencing [liblcf](http
 
 If you could, please consider supporting us through:
 
+- [Boosty](https://boosty.to/mcdeimos) (has lower fees)
 - [Ko-fi](https://ko-fi.com/savannstm)
-- [Patreon](https://www.patreon.com/cw/savannstm)
-- [Boosty](https://boosty.to/mcdeimos)
 
-Even if you don't, it's fine. We'll continue to do as we right now.
+Even if you don't, we will still continue working on the project anyways.
 
 ## License
 
