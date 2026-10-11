@@ -3,4 +3,3 @@
 /benches/liblcf_cmp/*.exe
 /benches/liblcf_cmp/*.pdb
 /benches/liblcf_cmp/*.obj
-/Cargo.lock
