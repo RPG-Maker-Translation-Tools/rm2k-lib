@@ -87,6 +87,12 @@ Most of the RPG Maker 2k/3 format handling was written referencing [liblcf](http
 
 [yyjson](https://github.com/ibireme/yyjson) (`yyjson.h`/`yyjson.c`, MIT licensed) is vendored in [`capi/examples/yyjson`](capi/examples) for the `to_json.c` example, its license is alongside it.
 
+## NPM
+
+I won't be continuing to publish the WASM bindings ([`rm2k-wasm`](./wasm/)) on NPM. NPM has made their 2FA completely unbearable, and I don't want to participate in this logging-in shitshow anymore.
+
+I'm looking for the first person I meet to whom I'll pass the ownership of the package on NPM, if they're willing to maintain it. Until then, you can always build the bindings from source.
+
 ## Support
 
 [Me](https://github.com/savannstm), the maintainer of this project, is a poor college student from Eastern Europe.
