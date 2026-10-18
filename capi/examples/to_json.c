@@ -4,18 +4,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// This example is built against a genuinely no_std rm2k-capi (see the build steps below), so the
-// library has no allocator of its own - it must be given one via rm2k_set_allocator before any
-// other rm2k_* call that allocates. Plain malloc/free happen to be what's available here, but
-// nothing about the hook shape requires that; a real freestanding target would back this with its
-// own heap.
+// Built against a no_std rm2k-capi (see the build steps below), which has no allocator of its own:
+// give it one via rm2k_set_allocator before any other allocating rm2k_* call. malloc/free happen to
+// be available here; a freestanding target would back the hook with its own heap.
 static uint8_t* host_alloc(size_t size, size_t align) {
     if (size == 0) {
         size = 1;
     }
-    // Plain malloc only guarantees alignof(max_align_t) - 16 bytes on every platform this example
-    // targets - so anything within that is a plain malloc; anything stricter goes through the
-    // platform's aligned allocator (MSVC's UCRT has no standard aligned_alloc).
+    // malloc only guarantees alignof(max_align_t) (16 bytes on every target here); stricter
+    // alignment goes through the platform's aligned allocator (MSVC's UCRT has no aligned_alloc).
     if (align <= 16) {
         return (uint8_t*)malloc(size);
     }
@@ -62,8 +59,7 @@ static uint8_t* read_file(const char* path, size_t* out_len) {
     return buf;
 }
 
-/* Latin-1 -> UTF-8, one code point per input byte. Caller frees the result with
- * free(). */
+/* Latin-1 -> UTF-8, one code point per input byte. Caller frees with free(). */
 static char* latin1_to_utf8(const uint8_t* data, size_t len, size_t* out_len) {
     char* buf = malloc(len * 2 + 1);
     size_t w = 0;
@@ -81,8 +77,7 @@ static char* latin1_to_utf8(const uint8_t* data, size_t len, size_t* out_len) {
     return buf;
 }
 
-/* Adds `key`: <bytes, as Latin-1-mapped UTF-8> to `obj`, copying the encoded
- * text into `doc`. */
+/* Adds `key` to `obj` with the bytes as Latin-1-mapped UTF-8, copied into `doc`. */
 static void add_bytes(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, Rm2kBytes bytes) {
     size_t utf8_len = 0;
     char* utf8 = latin1_to_utf8(bytes.data, bytes.len, &utf8_len);

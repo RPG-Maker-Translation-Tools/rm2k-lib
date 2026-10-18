@@ -208,3 +208,15 @@ fn the_named_chunk_ids_match_the_schema() {
         "EVENT_PAGE_COMMANDS is stale"
     );
 }
+
+#[test]
+fn an_owner_without_a_command_chunk_is_skipped() {
+    // A common-event list holding one element, id 1, whose only chunk is its name "a". There is no
+    // command chunk to find, so the walker must move past it and report nothing.
+    // Outer chunk 0x19 (the list), length 6: count 1 | element id 1 | chunk 0x01 "a" | terminator.
+    let body = [0x19, 0x06, 0x01, 0x01, 0x01, 0x01, 0x61, 0x00];
+    let mut sink = NullSink;
+    let mut ctx = Ctx::new(Engine::R2K, &mut sink);
+    let found = walk(CommandLists::in_common_events(&body, 0, &mut ctx), &mut ctx);
+    assert!(found.is_empty());
+}

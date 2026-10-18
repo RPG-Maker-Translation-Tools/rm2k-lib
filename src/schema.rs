@@ -13,8 +13,8 @@
 //! }
 //! ```
 //!
-//! Every generated struct carries a `pub unknown_chunks: `[`UnknownChunks`](crate::field::UnknownChunks)
-//! field. A chunk whose id matches no field is kept verbatim, anchored next to the last field
+//! Every generated struct carries a `pub unknown_chunks` field of type
+//! [`UnknownChunks`](crate::field::UnknownChunks). A chunk whose id matches no field is kept verbatim, anchored next to the last field
 //! that *was* recognised, and written back in that position - so a file carrying ids this schema
 //! does not know still round-trips byte-for-byte. It is still reported as a
 //! [`DiagKind::UnknownChunk`](crate::diag::DiagKind::UnknownChunk): preserved is not understood.
@@ -59,10 +59,9 @@
 //! - `db_version` - the one field ([`DatabaseVersion`](crate::raw::DatabaseVersion)) that is
 //!   always written under RPG Maker 2003 and elided under 2000.
 //!
-//! A companion chunk is read and discarded - the chunk length already says how long the payload
-//! is - but must be written back, and its elision is decided by its own element count, not its
-//! sibling's value. Its id is always one below the sibling's, so declaring it as a modifier keeps
-//! the emitted order right without needing a separate field entry.
+//! A companion chunk is read and discarded (the chunk length already gives the payload size) but
+//! written back, and elided by its own element count, not its sibling's value. Its id is one below
+//! the sibling's, so declaring it as a modifier keeps the emitted order without a separate field.
 //!
 //! # No engine-dependent defaults
 //!
@@ -164,6 +163,8 @@ macro_rules! lcf_struct {
         }
     ) => {
         $(#[$meta])*
+        // Some fields are `f64`, so `Eq` does not hold for every instance.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #[derive(Clone, Debug, PartialEq)]
         $vis struct $name$($gen)* {
             $($id_field)*
@@ -210,14 +211,12 @@ macro_rules! lcf_struct {
                     )*
                     _ => {
                         let _ = (data, ctx);
-                        // Companion size/count chunks are recognised but discarded: the chunk
-                        // framing already carries the length, so the value is redundant on read.
-                        // Kept off the matched path so it costs nothing for the ~39 structs that
-                        // have no companions at all.
+                        // Companion size/count chunks are discarded: the chunk framing already
+                        // carries the length. Off the matched path, so the ~39 structs without
+                        // companions pay nothing.
                         //
-                        // A companion reports its *sibling's* id, not its own, because that is
-                        // the id the writer emits it next to - so an unknown chunk that followed
-                        // it anchors to the same place either way.
+                        // A companion reports its *sibling's* id, the id the writer emits it
+                        // next to, so an unknown chunk after it anchors to the same place.
                         $($(
                             if $crate::lcf_struct!(@is_companion id, $flag $(= $fval)?) {
                                 return ::core::option::Option::Some($id);
@@ -254,12 +253,9 @@ macro_rules! lcf_struct {
                             $( && $crate::lcf_struct!(@allow engine, $flag $(= $fval)?) )*;
 
                         if allowed {
-                            // Only *this* field's default is materialised, and only when the
-                            // field is reachable. liblcf builds an entire default struct per
-                            // object written (`StructDefault<S>::make`), so for a struct with
-                            // array-valued defaults it allocates a vector per element written.
-                            // Here nothing is allocated unless this one field's own default is
-                            // an array.
+                            // Only this field's default is materialised, and only when reachable.
+                            // liblcf builds a whole default struct per object written
+                            // (`StructDefault<S>::make`), allocating per array-valued default.
                             let fdefault =
                                 $crate::lcf_struct!(@default engine, $fty $(, $default)?);
 
@@ -335,9 +331,7 @@ macro_rules! lcf_struct {
 
     // This field's default: the schema's explicit value, or the type's own.
     //
-    // Materialised per field rather than as a whole default struct. liblcf builds an entire
-    // default object for every object it writes (`StructDefault<S>::make`), which for a struct
-    // with array-valued defaults means allocating a vector per element written.
+    // Per field, not a whole default struct: liblcf's `StructDefault<S>::make` allocates per object.
     (@default $e:ident, $fty:ty, $default:expr) => { $default };
     (@default $e:ident, $fty:ty) => {
         <$fty as $crate::field::LcfField<'_>>::field_default($e)
@@ -379,9 +373,9 @@ macro_rules! lcf_struct {
 
     // Emit the companion chunk, if this modifier is one.
     //
-    // liblcf elides it when the sibling's element count matches the default's - note that is the
-    // *count*, not the value, and it is decided separately from whether the sibling itself is written.
-    // Seven of the thirty-two companions carry `PersistIfDefault`, hence the `_persist` variants.
+    // liblcf elides it when the sibling's *element count* matches the default's, decided separately
+    // from whether the sibling is written. Seven of the 32 companions carry `PersistIfDefault`,
+    // hence the `_persist` variants.
     (@companion $s:ident, $self:ident, $d:ident, $e:ident, $f:ident, size = $c:literal) => {
         if $crate::field::LcfField::element_count(&$self.$f)
             != $crate::field::LcfField::element_count(&$d)
@@ -437,13 +431,11 @@ macro_rules! lcf_struct {
 /// }
 /// ```
 ///
-/// Writing a 2000 file **skips** 2003-only flags entirely, which shifts every later flag down a
-/// bit position. Reading does **not** skip them: it fills the fields
-/// in declaration order from consecutive bits regardless of engine.
-/// So a 2003 bundle written as 2000 and read back does not
-/// round-trip its *values*. That is a liblcf bug, but files in the wild were produced by it, so
-/// reproducing it exactly is what keeps *bytes* round-tripping - which is the property that
-/// matters. Do not "fix" this without a corpus to check against.
+/// Writing a 2000 file **skips** 2003-only flags, shifting every later flag down a bit. Reading
+/// does **not** skip them: fields fill in declaration order from consecutive bits, whatever the
+/// engine. So a 2003 bundle written as 2000 and read back does not round-trip its *values*. That
+/// is a liblcf bug, but files in the wild carry it, and reproducing it keeps *bytes* round-tripping.
+/// Do not "fix" this without a corpus to check against.
 #[macro_export]
 macro_rules! lcf_flags {
     (

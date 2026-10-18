@@ -5,13 +5,12 @@
 //! [`Setup::setup`], which then also pads the actor's six stat curves out to the engine's
 //! maximum level.
 //!
-//! It is not automatic, because padding the curves **changes the file**. `Parameters` is a `persist` field, so it is
-//! always written back - at whatever length the padding left it. Running this on load would make
-//! a load/save cycle non-idempotent.
+//! Not automatic: padding the curves **changes the file**. `Parameters` is `persist`, so it is
+//! always written back at whatever length padding left it. Running this on load would make
+//! load/save non-idempotent.
 //!
-//! Byte-exactness is this crate's acceptance bar, so the fixup is separated out. Call it when you
-//! want values a game engine can run on; skip it when you are editing files and want to write
-//! back exactly what you read.
+//! Byte-exactness is this crate's bar, so the fixup is separate. Call it for values a game engine
+//! can run on; skip it when editing files and writing back exactly what you read.
 //!
 //! ```
 //! # use rm2k::{rpg::Database, setup::Setup, Engine, LcfStruct};

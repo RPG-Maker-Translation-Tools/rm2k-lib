@@ -1,13 +1,10 @@
 //! Where serialized bytes go.
 //!
-//! [`Sink`] abstracts the write destination so the same generated `write` method can serve a
-//! fixed stack buffer on an MCU, a `Vec<u8>`, or a file - no allocator or `std` required unless
-//! the destination itself needs one.
+//! [`Sink`] abstracts the write destination, so one generated `write` serves a fixed stack buffer
+//! on an MCU, a `Vec<u8>`, or a file. No allocator or `std` unless the destination needs one.
 //!
-//! The associated `Error` type is the point of the design. `Vec<u8>` cannot fail, so its impl
-//! uses [`Infallible`](core::convert::Infallible) - which makes the whole `alloc` write path
-//! statically infallible, and lets callers of an infallible write discard the result without
-//! pretending to handle an error that cannot occur.
+//! `Vec<u8>` cannot fail, so its `Error` is [`Infallible`](core::convert::Infallible): the `alloc`
+//! write path is statically infallible and callers can discard the result.
 
 use crate::error::WriteError;
 
@@ -80,9 +77,9 @@ impl Sink for SliceSink<'_> {
 
 /// Counts bytes without storing them.
 ///
-/// A cross-check for the generated `lcf_size` methods: writing into a `CountSink` must produce
-/// exactly what `lcf_size` predicted, or the two-pass writer would emit wrong chunk lengths.
-/// Cheap enough to assert on in tests for every fixture.
+/// Cross-checks the generated `lcf_size` methods: writing into a `CountSink` must match what
+/// `lcf_size` predicted, or the two-pass writer emits wrong chunk lengths. Cheap enough to assert
+/// on for every fixture in tests.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CountSink {
     len: u64,

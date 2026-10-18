@@ -1,6 +1,6 @@
 # Benchmarks
 
-A measured comparison against `liblcf`. Two things are timed, both against the same real game ([OFF](https://www.mediafire.com/file/sx1kyo89yu0dko1/OFF_English_3.0.zip/file), RPG Maker 2000, English release):
+A measured comparison against `liblcf`. Two things are timed, both against the same real game ([OFF](https://www.mediafire.com/file/sx1kyo89yu0dko1/OFF_English_3.0.zip/file), RPG Maker 2003, English release):
 
 - **`ldb`** - parsing `RPG_RT.ldb`, the database (one large structured file: ~262 KB).
 - **`maps`** - parsing every `.lmu` map file in the game directory (347 files), once per pass.
@@ -17,11 +17,9 @@ Both sides read every file into memory once, up front, outside the timed region.
 
 ## Running it
 
-**Rust side** (from this repo):
+**Rust side** (from this repo). `RM2K_BENCH_GAME_DIR` must name the game directory; the benchmark panics without it:
 
 ```bash
-cargo bench --bench database_load
-# or point it at a different game:
 RM2K_BENCH_GAME_DIR="/path/to/game" cargo bench --bench database_load
 ```
 
@@ -46,7 +44,7 @@ Build this repo's comparison harness against it:
 
 ```bash
 clang++ -std=c++17 -O3 -DNDEBUG \
-    -I /tmp/liblcf/build-bench/src -I src -I src/generated \
+    -I /tmp/liblcf/build-bench/src \
     benches/liblcf_cmp/bench_load.cpp -o benches/liblcf_cmp/bench_load \
     /tmp/liblcf/build-bench/liblcf.a
 
@@ -58,7 +56,7 @@ clang++ -std=c++17 -O3 -DNDEBUG \
 
 ```bash
 clang++ -std=c++17 -O3 -DNDEBUG -fms-runtime-lib=dll \
-    -I /tmp/liblcf/build-bench/src -I src -I src/generated \
+    -I /tmp/liblcf/build-bench/src \
     benches/liblcf_cmp/bench_load.cpp -o benches/liblcf_cmp/bench_load.exe \
     /tmp/liblcf/build-bench/lcf.lib
 

@@ -11,21 +11,18 @@ use core::{
 };
 
 /// Host allocation hook: returns a pointer to at least `size` bytes aligned to `align` (a power of
-/// two), or `NULL` on failure.
-///
-/// Not assumed to be `malloc` - back it with whatever allocator the target actually has. See
-/// `rm2k_set_allocator`.
+/// two), or `NULL` on failure. Not assumed to be `malloc`; see `rm2k_set_allocator`.
 pub type Rm2kAllocFn = unsafe extern "C" fn(size: usize, align: usize) -> *mut u8;
 
 /// Host deallocation hook: gets back exactly the `(ptr, size, align)` triple a prior `Rm2kAllocFn`
 /// call produced. See `rm2k_set_allocator`.
 pub type Rm2kFreeFn = unsafe extern "C" fn(ptr: *mut u8, size: usize, align: usize);
 
-/// Registers the host's allocator. Must be called exactly once, before any other `rm2k_*` function
-/// that allocates, in a `no_std` build of this library.
+/// Registers the host's allocator.
 ///
-/// It has no effect, and need not be called, in the default `std`-linked build, which uses Rust's
-/// own allocator. See this crate's README for the caller-facing `no_std` contract.
+/// Must be called exactly once, before any other `rm2k_*` function that allocates, in a `no_std`
+/// build. No effect, and not needed, in the default `std` build, which uses Rust's allocator. See
+/// the README's `no_std` contract.
 ///
 /// # Safety
 ///
@@ -33,7 +30,7 @@ pub type Rm2kFreeFn = unsafe extern "C" fn(ptr: *mut u8, size: usize, align: usi
 /// thread this library's functions are called from, and `free` must accept exactly the
 /// `(ptr, size, align)` triples a prior call to `alloc` handed out (same values, not just an
 /// equivalent layout).
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_set_allocator(alloc: Rm2kAllocFn, free: Rm2kFreeFn) {
     #[cfg(not(feature = "std"))]
     host_alloc::set(alloc, free);
@@ -41,8 +38,7 @@ pub unsafe extern "C" fn rm2k_set_allocator(alloc: Rm2kAllocFn, free: Rm2kFreeFn
     let _ = (alloc, free);
 }
 
-// The allocator and panic handler a `no_std` build needs, both absent when this crate is built
-// with its default `std` feature: Rust's own allocator and unwinding machinery already cover this.
+// The allocator and panic handler a `no_std` build needs. The `std` build has Rust's own.
 #[cfg(not(feature = "std"))]
 mod host_alloc {
     use super::{Rm2kAllocFn, Rm2kFreeFn};
@@ -89,11 +85,16 @@ mod host_alloc {
 
     #[panic_handler]
     fn panic(_info: &core::panic::PanicInfo) -> ! {
-        unsafe extern "C" {
+        extern "C" {
             fn abort() -> !;
         }
         unsafe { abort() }
     }
+
+    // The prebuilt `alloc` references the unwinder's personality even under `panic = "abort"`, and ELF linkers
+    // (not MSVC's) need it defined. Nothing unwinds here, because the panic handler aborts, so it is never called.
+    #[no_mangle]
+    pub extern "C" fn rust_eh_personality() {}
 }
 
 use rm2k::cursor::{ChunkIter, Ctx, ListWalker};
@@ -182,7 +183,7 @@ pub struct Rm2kBytes {
 }
 
 impl Rm2kBytes {
-    fn new(bytes: &[u8]) -> Self {
+    const fn new(bytes: &[u8]) -> Self {
         Self {
             data: bytes.as_ptr(),
             len: bytes.len(),
@@ -239,7 +240,7 @@ pub struct Rm2kEventCommand {
     /// The command's string, verbatim: strings are raw bytes in the game's code page.
     pub string: Rm2kBytes,
     /// Private; read the parameters via `rm2k_event_command_param`.
-    pub _params: Rm2kBytes,
+    pub raw_params: Rm2kBytes,
 }
 
 /// One recovered problem, found by `rm2k_diagnostics_get`.
@@ -250,12 +251,20 @@ pub struct Rm2kDiagnostic {
     pub chunk_id: u32,
     /// One of the `RM2K_DIAG_*` values.
     pub kind: u8,
+    /// The struct the problem was found in. A static label, valid for the life of the process.
+    pub struct_name: Rm2kBytes,
 }
 
-/// Diagnostic kind: a chunk whose id the schema does not know; it is kept and written back verbatim.
+// SAFETY: `struct_name` only ever points at a `&'static str` (`rm2k::Diagnostic::struct_name` is `'static`),
+// which is immutable for the life of the process. Sharing or moving the pointer across threads is therefore sound.
+// The fields are `pub`, so a Rust caller who builds one by hand must keep to the same rule.
+unsafe impl Send for Rm2kDiagnostic {}
+// SAFETY: as for `Send`: the pointee is immutable static data, so concurrent reads cannot race.
+unsafe impl Sync for Rm2kDiagnostic {}
+
+/// Diagnostic kind: a chunk whose id the schema does not know; kept and written back verbatim.
 ///
-/// The `RM2K_DIAG_*` values are what `Rm2kDiagnostic::kind` holds and `rm2k_diagnostic_kind_name`
-/// labels. They mirror `rm2k::DiagKind`.
+/// These mirror `rm2k::DiagKind`; `rm2k_diagnostic_kind_name` labels them.
 pub const RM2K_DIAG_UNKNOWN_CHUNK: u8 = 0;
 /// Diagnostic kind: a chunk too short for the field it belongs to.
 pub const RM2K_DIAG_SHORT_CHUNK: u8 = 1;
@@ -271,10 +280,11 @@ pub const RM2K_DIAG_BAD_MAGIC: u8 = 5;
 pub const RM2K_DIAG_EVENT_LIST_CORRUPT: u8 = 6;
 /// Diagnostic kind: an array payload whose length is not a multiple of its element size.
 pub const RM2K_DIAG_RAGGED_ARRAY: u8 = 7;
+/// Diagnostic kind: a string list ran past the load's entry budget, so the rest of that list was dropped.
+pub const RM2K_DIAG_ENTRY_BUDGET_EXHAUSTED: u8 = 8;
 
-fn diag_kind_index(kind: DiagKind) -> u8 {
+const fn diag_kind_index(kind: DiagKind) -> u8 {
     match kind {
-        DiagKind::UnknownChunk => RM2K_DIAG_UNKNOWN_CHUNK,
         DiagKind::ShortChunk => RM2K_DIAG_SHORT_CHUNK,
         DiagKind::TrailingBytes => RM2K_DIAG_TRAILING_BYTES,
         DiagKind::BadVarint => RM2K_DIAG_BAD_VARINT,
@@ -282,8 +292,9 @@ fn diag_kind_index(kind: DiagKind) -> u8 {
         DiagKind::BadMagic => RM2K_DIAG_BAD_MAGIC,
         DiagKind::EventListCorrupt => RM2K_DIAG_EVENT_LIST_CORRUPT,
         DiagKind::RaggedArray => RM2K_DIAG_RAGGED_ARRAY,
-        // `DiagKind` is `#[non_exhaustive]`; anything new reports as "unknown chunk" rather than
-        // silently taking on another kind's meaning.
+        DiagKind::EntryBudgetExhausted => RM2K_DIAG_ENTRY_BUDGET_EXHAUSTED,
+        // `DiagKind` is `#[non_exhaustive]`: unknown chunks and kinds added later both report as "unknown chunk",
+        // never as another kind's label.
         _ => RM2K_DIAG_UNKNOWN_CHUNK,
     }
 }
@@ -291,11 +302,11 @@ fn diag_kind_index(kind: DiagKind) -> u8 {
 /// Opaque collector of recovered problems. Release it with `rm2k_diagnostics_free`.
 pub struct Rm2kDiagnostics(Vec<Diagnostic>);
 
-/// Creates an empty collector of recovered problems. Release it with `rm2k_diagnostics_free`.
+/// Creates an empty collector. Release it with `rm2k_diagnostics_free`.
 ///
-/// Diagnostics are optional everywhere: pass `NULL` to any function taking an `Rm2kDiagnostics*` to
-/// discard recovered problems, which is also the only fully allocation-free option.
-#[unsafe(no_mangle)]
+/// Diagnostics are optional everywhere: pass `NULL` wherever an `Rm2kDiagnostics*` is taken to
+/// discard them. That is also the only fully allocation-free option.
+#[no_mangle]
 pub extern "C" fn rm2k_diagnostics_new() -> *mut Rm2kDiagnostics {
     alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Rm2kDiagnostics(Vec::new())))
 }
@@ -305,7 +316,7 @@ pub extern "C" fn rm2k_diagnostics_new() -> *mut Rm2kDiagnostics {
 /// # Safety
 ///
 /// `diagnostics` must have come from `rm2k_diagnostics_new` and not been freed already.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_diagnostics_free(diagnostics: *mut Rm2kDiagnostics) {
     if !diagnostics.is_null() {
         drop(unsafe { alloc::boxed::Box::from_raw(diagnostics) });
@@ -317,12 +328,9 @@ pub unsafe extern "C" fn rm2k_diagnostics_free(diagnostics: *mut Rm2kDiagnostics
 /// # Safety
 ///
 /// `diagnostics` must be `NULL` or a live collector.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_diagnostics_count(diagnostics: *const Rm2kDiagnostics) -> usize {
-    match unsafe { diagnostics.as_ref() } {
-        Some(d) => d.0.len(),
-        None => 0,
-    }
+    unsafe { diagnostics.as_ref() }.map_or(0, |d| d.0.len())
 }
 
 /// Writes diagnostic `index` to `out` and returns `true`, or returns `false` when `index` is out of
@@ -331,7 +339,7 @@ pub unsafe extern "C" fn rm2k_diagnostics_count(diagnostics: *const Rm2kDiagnost
 /// # Safety
 ///
 /// `diagnostics` must be `NULL` or a live collector; `out` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_diagnostics_get(
     diagnostics: *const Rm2kDiagnostics,
     index: usize,
@@ -345,6 +353,7 @@ pub unsafe extern "C" fn rm2k_diagnostics_get(
         offset: entry.offset,
         chunk_id: entry.chunk_id,
         kind: diag_kind_index(entry.kind),
+        struct_name: Rm2kBytes::new(entry.struct_name.as_bytes()),
     };
     true
 }
@@ -354,21 +363,20 @@ pub unsafe extern "C" fn rm2k_diagnostics_get(
 /// # Safety
 ///
 /// `diagnostics` must be `NULL` or a live collector.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_diagnostics_clear(diagnostics: *mut Rm2kDiagnostics) {
     if let Some(d) = unsafe { diagnostics.as_mut() } {
         d.0.clear();
     }
 }
 
-/// A fixed English label for a diagnostic kind (one of the `RM2K_DIAG_*` values). NUL-terminated,
-/// static, never freed.
+/// Fixed English label for a diagnostic kind (one of the `RM2K_DIAG_*` values).
 ///
-/// This is the one place this API hands back a `char*`: the labels are owned by this crate, not
-/// data out of a file, so no allocation is needed to produce them.
-#[unsafe(no_mangle)]
+/// NUL-terminated, static, never freed. The only `char*` this API returns: the labels are this
+/// crate's, not file data, so no allocation is needed.
+#[no_mangle]
 pub extern "C" fn rm2k_diagnostic_kind_name(kind: u8) -> *const c_char {
-    const NAMES: [&str; 8] = [
+    const NAMES: [&str; 9] = [
         "unknown chunk\0",
         "chunk too short for field\0",
         "trailing bytes in chunk\0",
@@ -377,9 +385,10 @@ pub extern "C" fn rm2k_diagnostic_kind_name(kind: u8) -> *const c_char {
         "unexpected file magic\0",
         "event command list not terminated\0",
         "array payload not a multiple of element size\0",
+        "string list over the load's entry budget\0",
     ];
-    let index = usize::from(kind).min(NAMES.len() - 1);
-    NAMES[index].as_ptr().cast()
+    // An unknown code gets the same label as an unknown kind: "unknown chunk", matching `diag_kind_index`.
+    NAMES.get(usize::from(kind)).unwrap_or(&NAMES[0]).as_ptr().cast()
 }
 
 // SAFETY: the caller contract on every entry point is that `diagnostics` is NULL or live.
@@ -390,8 +399,7 @@ fn with_sink<R>(diagnostics: *mut Rm2kDiagnostics, body: impl FnOnce(&mut dyn Di
     }
 }
 
-// The engine is always 2000 here, and that is not a shortcut: no field's default depends on the
-// engine, so reading never consults it. See the `rm2k::file` docs.
+// Always 2000: no field's default depends on the engine, so reading never consults it. See `rm2k::file`.
 fn with_ctx<R>(diagnostics: *mut Rm2kDiagnostics, body: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
     with_sink(diagnostics, |sink| {
         let mut ctx = Ctx::new(Engine::R2K, sink);
@@ -404,23 +412,19 @@ fn with_ctx<R>(diagnostics: *mut Rm2kDiagnostics, body: impl FnOnce(&mut Ctx<'_>
 /// # Safety
 ///
 /// `ptr`/`len` must be exactly what a `rm2k_*_save` call returned, freed once. The length
-/// is required because the allocation is reconstituted as a `Vec` to release it.
-#[unsafe(no_mangle)]
+/// is required because the allocation is reconstituted as a boxed slice to release it.
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_buffer_free(ptr: *mut u8, len: usize) {
     if !ptr.is_null() {
-        drop(unsafe { Vec::from_raw_parts(ptr, len, len) });
+        drop(unsafe { alloc::boxed::Box::from_raw(core::ptr::slice_from_raw_parts_mut(ptr, len)) });
     }
 }
 
-fn leak_vec(mut bytes: Vec<u8>, out_len: *mut usize) -> *mut u8 {
-    bytes.shrink_to_fit();
-    // `shrink_to_fit` is not contractually exact, so use the real capacity as the length the
-    // caller must hand back. They are equal in practice; relying on that would be a leak waiting
-    // to happen.
-    let len = bytes.len();
-    debug_assert_eq!(bytes.capacity(), len);
-    let ptr = bytes.as_mut_ptr();
-    core::mem::forget(bytes);
+fn leak_vec(bytes: Vec<u8>, out_len: *mut usize) -> *mut u8 {
+    // `into_boxed_slice` shrinks the allocation to exactly its length, which is what `rm2k_buffer_free` frees.
+    let boxed = bytes.into_boxed_slice();
+    let len = boxed.len();
+    let ptr = alloc::boxed::Box::into_raw(boxed).cast::<u8>();
     // SAFETY: the caller contract is that `out_len` is writable or NULL.
     if let Some(out) = unsafe { out_len.as_mut() } {
         *out = len;
@@ -569,23 +573,19 @@ unsafe fn free_handle<H>(handle: *mut H) {
 
 unsafe fn handle_header<H: Handle>(handle: *const H) -> Rm2kBytes {
     // SAFETY: caller contract.
-    match unsafe { handle.as_ref() } {
-        Some(handle) => Rm2kBytes::new(handle.header()),
-        None => Rm2kBytes::EMPTY,
-    }
+    unsafe { handle.as_ref() }.map_or(Rm2kBytes::EMPTY, |handle| Rm2kBytes::new(handle.header()))
 }
 
-/// Loads a `RPG_RT.ldb` database. Returns `NULL` on failure, writing the reason through `out_error` when it is
+/// Loads a `RPG_RT.ldb` database. Returns `NULL` on failure, with the reason in `out_error` if
 /// non-`NULL`.
 ///
-/// Release the handle with `rm2k_database_free`. `diagnostics` may be `NULL` to discard recovered
-/// problems.
+/// Free with `rm2k_database_free`. `diagnostics` may be `NULL` to discard recovered problems.
 ///
 /// # Safety
 ///
 /// `data` must be `NULL` or point to at least `len` readable bytes. `diagnostics` must be `NULL` or
 /// a live collector from `rm2k_diagnostics_new`. `out_error`, if non-null, must be writable.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_database_load(
     data: *const u8,
     len: usize,
@@ -595,15 +595,15 @@ pub unsafe extern "C" fn rm2k_database_load(
     unsafe { load_handle(data, len, diagnostics, out_error, load_database) }
 }
 
-/// Writes the loaded `RPG_RT.ldb` database back out for `engine`. Returns a buffer you own, or `NULL`.
+/// Writes the loaded `RPG_RT.ldb` database back for `engine`. Returns an owned buffer, or `NULL`.
 ///
-/// Release the buffer with `rm2k_buffer_free`, passing the length written to `out_len`. With
-/// `preserve_header` the file's magic string is written back as it was read.
+/// Free with `rm2k_buffer_free`, passing the length written to `out_len`. `preserve_header` writes
+/// the magic string back as it was read.
 ///
 /// # Safety
 ///
 /// `handle` must be live. `out_len` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_database_save(
     handle: *const Rm2kDatabase,
     engine: Rm2kEngine,
@@ -618,7 +618,7 @@ pub unsafe extern "C" fn rm2k_database_save(
 /// # Safety
 ///
 /// `handle` must have come from `rm2k_database_load` and not been freed already.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_database_free(handle: *mut Rm2kDatabase) {
     unsafe { free_handle(handle) }
 }
@@ -628,22 +628,21 @@ pub unsafe extern "C" fn rm2k_database_free(handle: *mut Rm2kDatabase) {
 /// # Safety
 ///
 /// `handle` must be live.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_database_header(handle: *const Rm2kDatabase) -> Rm2kBytes {
     unsafe { handle_header(handle) }
 }
 
-/// Loads a `MapNNNN.lmu` map. Returns `NULL` on failure, writing the reason through `out_error` when it is
+/// Loads a `MapNNNN.lmu` map. Returns `NULL` on failure, with the reason in `out_error` if
 /// non-`NULL`.
 ///
-/// Release the handle with `rm2k_map_free`. `diagnostics` may be `NULL` to discard recovered
-/// problems.
+/// Free with `rm2k_map_free`. `diagnostics` may be `NULL` to discard recovered problems.
 ///
 /// # Safety
 ///
 /// `data` must be `NULL` or point to at least `len` readable bytes. `diagnostics` must be `NULL` or
 /// a live collector from `rm2k_diagnostics_new`. `out_error`, if non-null, must be writable.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_map_load(
     data: *const u8,
     len: usize,
@@ -653,15 +652,15 @@ pub unsafe extern "C" fn rm2k_map_load(
     unsafe { load_handle(data, len, diagnostics, out_error, load_map) }
 }
 
-/// Writes the loaded `MapNNNN.lmu` map back out for `engine`. Returns a buffer you own, or `NULL`.
+/// Writes the loaded `MapNNNN.lmu` map back for `engine`. Returns an owned buffer, or `NULL`.
 ///
-/// Release the buffer with `rm2k_buffer_free`, passing the length written to `out_len`. With
-/// `preserve_header` the file's magic string is written back as it was read.
+/// Free with `rm2k_buffer_free`, passing the length written to `out_len`. `preserve_header` writes
+/// the magic string back as it was read.
 ///
 /// # Safety
 ///
 /// `handle` must be live. `out_len` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_map_save(
     handle: *const Rm2kMap,
     engine: Rm2kEngine,
@@ -676,7 +675,7 @@ pub unsafe extern "C" fn rm2k_map_save(
 /// # Safety
 ///
 /// `handle` must have come from `rm2k_map_load` and not been freed already.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_map_free(handle: *mut Rm2kMap) {
     unsafe { free_handle(handle) }
 }
@@ -686,22 +685,21 @@ pub unsafe extern "C" fn rm2k_map_free(handle: *mut Rm2kMap) {
 /// # Safety
 ///
 /// `handle` must be live.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_map_header(handle: *const Rm2kMap) -> Rm2kBytes {
     unsafe { handle_header(handle) }
 }
 
-/// Loads a `RPG_RT.lmt` map tree. Returns `NULL` on failure, writing the reason through `out_error` when it is
+/// Loads a `RPG_RT.lmt` map tree. Returns `NULL` on failure, with the reason in `out_error` if
 /// non-`NULL`.
 ///
-/// Release the handle with `rm2k_tree_map_free`. `diagnostics` may be `NULL` to discard recovered
-/// problems.
+/// Free with `rm2k_tree_map_free`. `diagnostics` may be `NULL` to discard recovered problems.
 ///
 /// # Safety
 ///
 /// `data` must be `NULL` or point to at least `len` readable bytes. `diagnostics` must be `NULL` or
 /// a live collector from `rm2k_diagnostics_new`. `out_error`, if non-null, must be writable.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_tree_map_load(
     data: *const u8,
     len: usize,
@@ -711,15 +709,15 @@ pub unsafe extern "C" fn rm2k_tree_map_load(
     unsafe { load_handle(data, len, diagnostics, out_error, load_tree_map) }
 }
 
-/// Writes the loaded `RPG_RT.lmt` map tree back out for `engine`. Returns a buffer you own, or `NULL`.
+/// Writes the loaded `RPG_RT.lmt` map tree back for `engine`. Returns an owned buffer, or `NULL`.
 ///
-/// Release the buffer with `rm2k_buffer_free`, passing the length written to `out_len`. With
-/// `preserve_header` the file's magic string is written back as it was read.
+/// Free with `rm2k_buffer_free`, passing the length written to `out_len`. `preserve_header` writes
+/// the magic string back as it was read.
 ///
 /// # Safety
 ///
 /// `handle` must be live. `out_len` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_tree_map_save(
     handle: *const Rm2kTreeMap,
     engine: Rm2kEngine,
@@ -734,7 +732,7 @@ pub unsafe extern "C" fn rm2k_tree_map_save(
 /// # Safety
 ///
 /// `handle` must have come from `rm2k_tree_map_load` and not been freed already.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_tree_map_free(handle: *mut Rm2kTreeMap) {
     unsafe { free_handle(handle) }
 }
@@ -744,22 +742,21 @@ pub unsafe extern "C" fn rm2k_tree_map_free(handle: *mut Rm2kTreeMap) {
 /// # Safety
 ///
 /// `handle` must be live.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_tree_map_header(handle: *const Rm2kTreeMap) -> Rm2kBytes {
     unsafe { handle_header(handle) }
 }
 
-/// Loads a `.lsd` save file. Returns `NULL` on failure, writing the reason through `out_error` when it is
+/// Loads a `.lsd` save file. Returns `NULL` on failure, with the reason in `out_error` if
 /// non-`NULL`.
 ///
-/// Release the handle with `rm2k_save_free`. `diagnostics` may be `NULL` to discard recovered
-/// problems.
+/// Free with `rm2k_save_free`. `diagnostics` may be `NULL` to discard recovered problems.
 ///
 /// # Safety
 ///
 /// `data` must be `NULL` or point to at least `len` readable bytes. `diagnostics` must be `NULL` or
 /// a live collector from `rm2k_diagnostics_new`. `out_error`, if non-null, must be writable.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_save_load(
     data: *const u8,
     len: usize,
@@ -769,15 +766,15 @@ pub unsafe extern "C" fn rm2k_save_load(
     unsafe { load_handle(data, len, diagnostics, out_error, load_save) }
 }
 
-/// Writes the loaded `.lsd` save file back out for `engine`. Returns a buffer you own, or `NULL`.
+/// Writes the loaded `.lsd` save file back for `engine`. Returns an owned buffer, or `NULL`.
 ///
-/// Release the buffer with `rm2k_buffer_free`, passing the length written to `out_len`. With
-/// `preserve_header` the file's magic string is written back as it was read.
+/// Free with `rm2k_buffer_free`, passing the length written to `out_len`. `preserve_header` writes
+/// the magic string back as it was read.
 ///
 /// # Safety
 ///
 /// `handle` must be live. `out_len` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_save_save(
     handle: *const Rm2kSave,
     engine: Rm2kEngine,
@@ -792,7 +789,7 @@ pub unsafe extern "C" fn rm2k_save_save(
 /// # Safety
 ///
 /// `handle` must have come from `rm2k_save_load` and not been freed already.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_save_free(handle: *mut Rm2kSave) {
     unsafe { free_handle(handle) }
 }
@@ -802,7 +799,7 @@ pub unsafe extern "C" fn rm2k_save_free(handle: *mut Rm2kSave) {
 /// # Safety
 ///
 /// `handle` must be live.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_save_header(handle: *const Rm2kSave) -> Rm2kBytes {
     unsafe { handle_header(handle) }
 }
@@ -812,12 +809,17 @@ pub unsafe extern "C" fn rm2k_save_header(handle: *const Rm2kSave) -> Rm2kBytes 
 /// # Safety
 ///
 /// `handle` must be live.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_database_engine(handle: *const Rm2kDatabase) -> Rm2kEngine {
-    match unsafe { handle.as_ref() } {
-        Some(handle) => Engine::from_ldb_id(handle.value.system.ldb_id).into(),
-        None => Rm2kEngine::R2K,
-    }
+    unsafe { handle.as_ref() }.map_or(Rm2kEngine::R2K, |handle| {
+        Engine::from_ldb_id(handle.value.system.ldb_id).into()
+    })
+}
+
+/// Classifies a raw `system.ldb_id` value: `2003` is 2003, anything else is 2000.
+#[no_mangle]
+pub extern "C" fn rm2k_engine_from_ldb_id(ldb_id: i32) -> Rm2kEngine {
+    Engine::from_ldb_id(ldb_id).into()
 }
 
 /// A database entry's id and name; the name borrows from the handle.
@@ -856,21 +858,17 @@ fn with_list<R>(
 
 /// The number of entries of one of the database's named lists.
 ///
-/// A typed accessor per field would be ~1200 functions; per list it is two
-/// (`rm2k_database_list_len` and `rm2k_database_list_get`), which covers what tools actually ask
-/// for. Everything else is reachable through the zero-copy walkers.
+/// A typed accessor per field would be ~1200 functions; two per list (`rm2k_database_list_len` and
+/// `rm2k_database_list_get`) cover what tools ask for. The zero-copy walkers reach the rest.
 ///
 /// # Safety
 ///
 /// `handle` must be live.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_database_list_len(handle: *const Rm2kDatabase, list: Rm2kDbList) -> usize {
-    match unsafe { handle.as_ref() } {
-        // A closure rather than `Iterator::count`: the higher-ranked bound on `with_list` needs a
-        // callable that is generic over the iterator's lifetime, and a bare method path is not.
-        Some(handle) => with_list(&handle.value, list, |entries| entries.count()),
-        None => 0,
-    }
+    // A closure, not `Iterator::count`: `with_list`'s higher-ranked bound needs a callable generic
+    // over the iterator's lifetime; a bare method path is not.
+    unsafe { handle.as_ref() }.map_or(0, |handle| with_list(&handle.value, list, |entries| entries.count()))
 }
 
 /// Writes the entry at `index` of `list` to `out` and returns `true`, or returns `false` when
@@ -881,7 +879,7 @@ pub unsafe extern "C" fn rm2k_database_list_len(handle: *const Rm2kDatabase, lis
 /// # Safety
 ///
 /// `handle` must be live; `out` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_database_list_get(
     handle: *const Rm2kDatabase,
     list: Rm2kDbList,
@@ -903,20 +901,19 @@ pub unsafe extern "C" fn rm2k_database_list_get(
     })
 }
 
-// The zero-copy walkers are C-visible inline structs that store a Rust walker in the caller's
-// memory: initialize one with the matching `_init` function and pass it by pointer. It borrows the
-// buffer it was initialised from, so that buffer must outlive it.
+// The zero-copy walkers are C-visible inline structs holding a Rust walker in caller memory:
+// initialize one with its `_init` function and pass it by pointer. It borrows the buffer it was
+// initialised from, which must outlive it.
 //
-// The alternative would be boxing each walker, which would put an allocation on the one path whose
-// whole point is not having one. The storage is `u64` words rather than bytes so it is 8-aligned
-// without `repr(align)` (which cbindgen would turn into an opaque type), and its size is asserted
-// at compile time, so growing the Rust type is a build error here rather than memory corruption at
-// the call site.
+// Boxing each walker would put an allocation on the one path meant to have none. The storage is
+// `u64` words, not bytes, so it is 8-aligned without `repr(align)` (which cbindgen turns into an
+// opaque type). The size is asserted at compile time: growing the Rust type is a build error, not
+// memory corruption at the call site.
 
 /// Iterator over the chunks of a chunk stream; see `rm2k_chunk_iter_init`.
 ///
-/// Treat the contents as opaque: initialize it with `rm2k_chunk_iter_init` and pass it by pointer.
-/// It borrows the buffer it was initialised from.
+/// Opaque: initialize with `rm2k_chunk_iter_init` and pass by pointer. Borrows the buffer it was
+/// initialised from.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Rm2kChunkIter {
@@ -925,8 +922,8 @@ pub struct Rm2kChunkIter {
 
 /// Walker over the elements of an indexed list; see `rm2k_list_walker_init`.
 ///
-/// Treat the contents as opaque: initialize it with `rm2k_list_walker_init` and pass it by pointer.
-/// It borrows the buffer it was initialised from.
+/// Opaque: initialize with `rm2k_list_walker_init` and pass by pointer. Borrows the buffer it was
+/// initialised from.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Rm2kListWalker {
@@ -935,8 +932,8 @@ pub struct Rm2kListWalker {
 
 /// Walker over the event command lists of a file; see `rm2k_command_lists_init`.
 ///
-/// Treat the contents as opaque: initialize it with `rm2k_command_lists_init` and pass it by
-/// pointer. It borrows the buffer it was initialised from.
+/// Opaque: initialize with `rm2k_command_lists_init` and pass by pointer. Borrows the buffer it was
+/// initialised from.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Rm2kCommandLists {
@@ -945,8 +942,8 @@ pub struct Rm2kCommandLists {
 
 /// Iterator over the commands of an event command list; see `rm2k_event_commands_init`.
 ///
-/// Treat the contents as opaque: initialize it with `rm2k_event_commands_init` and pass it by
-/// pointer. It borrows the buffer it was initialised from.
+/// Opaque: initialize with `rm2k_event_commands_init` and pass by pointer. Borrows the buffer it
+/// was initialised from.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Rm2kEventCommands {
@@ -956,7 +953,10 @@ pub struct Rm2kEventCommands {
 macro_rules! opaque_inline {
     ($name:ident, $inner:ty) => {
         const _: () = {
-            assert!(size_of::<$inner>() <= size_of::<$name>(), "opaque buffer too small; raise it");
+            assert!(
+                size_of::<$inner>() <= size_of::<$name>(),
+                "opaque buffer too small; raise it"
+            );
             assert!(align_of::<$inner>() <= align_of::<$name>());
         };
 
@@ -980,7 +980,7 @@ opaque_inline!(Rm2kCommandLists, CommandLists<'static>);
 opaque_inline!(Rm2kEventCommands, EventCommandIter<'static>);
 
 // SAFETY: `data` must point to `len` readable bytes that outlive every walker built from them.
-// This is the one contract the zero-copy API cannot check, and it is stated on every entry point.
+// The one contract the zero-copy API cannot check; stated on every entry point.
 unsafe fn slice<'a>(data: *const u8, len: usize) -> Option<&'a [u8]> {
     if data.is_null() {
         return None;
@@ -988,14 +988,13 @@ unsafe fn slice<'a>(data: *const u8, len: usize) -> Option<&'a [u8]> {
     Some(unsafe { core::slice::from_raw_parts(data, len) })
 }
 
-/// The zero-copy walkers operate on a *body*, not on a whole file, so this is normally the first
-/// call.
+/// The zero-copy walkers take a *body*, not a whole file, so this is normally the first call.
 ///
 /// # Safety
 ///
 /// `data` must point to `len` readable bytes; `out_body` and `out_header` must be writable
 /// or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_split_header(
     data: *const u8,
     len: usize,
@@ -1025,7 +1024,7 @@ pub unsafe extern "C" fn rm2k_split_header(
 /// # Safety
 ///
 /// `iter` must be writable; `data` must point to `len` readable bytes that outlive `iter`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_chunk_iter_init(
     iter: *mut Rm2kChunkIter,
     data: *const u8,
@@ -1046,7 +1045,7 @@ pub unsafe extern "C" fn rm2k_chunk_iter_init(
 ///
 /// `iter` must have been initialised and its buffer still alive; `out` must be writable or
 /// `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_chunk_iter_next(
     iter: *mut Rm2kChunkIter,
     diagnostics: *mut Rm2kDiagnostics,
@@ -1072,7 +1071,7 @@ pub unsafe extern "C" fn rm2k_chunk_iter_next(
 /// # Safety
 ///
 /// `data` must point to `len` readable bytes; `out` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_chunk_find(
     data: *const u8,
     len: usize,
@@ -1103,7 +1102,7 @@ pub unsafe extern "C" fn rm2k_chunk_find(
 ///
 /// `walker` must be writable; `data` must point to `len` readable bytes that outlive
 /// `walker`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_list_walker_init(
     walker: *mut Rm2kListWalker,
     data: *const u8,
@@ -1126,7 +1125,7 @@ pub unsafe extern "C" fn rm2k_list_walker_init(
 ///
 /// `walker` must have been initialised and its buffer still alive; `out` must be writable
 /// or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_list_walker_next(
     walker: *mut Rm2kListWalker,
     diagnostics: *mut Rm2kDiagnostics,
@@ -1167,7 +1166,7 @@ pub enum Rm2kEventScope {
 ///
 /// `lists` must be writable; `data` must point to `len` readable bytes that outlive
 /// `lists`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_command_lists_init(
     lists: *mut Rm2kCommandLists,
     scope: Rm2kEventScope,
@@ -1195,7 +1194,7 @@ pub unsafe extern "C" fn rm2k_command_lists_init(
 ///
 /// `lists` must have been initialised and its buffer still alive; `out` must be writable
 /// or `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_command_lists_next(
     lists: *mut Rm2kCommandLists,
     diagnostics: *mut Rm2kDiagnostics,
@@ -1223,7 +1222,7 @@ pub unsafe extern "C" fn rm2k_command_lists_next(
 /// # Safety
 ///
 /// `iter` must be writable; `data` must point to `len` readable bytes that outlive `iter`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_event_commands_init(
     iter: *mut Rm2kEventCommands,
     data: *const u8,
@@ -1244,7 +1243,7 @@ pub unsafe extern "C" fn rm2k_event_commands_init(
 ///
 /// `iter` must have been initialised and its buffer still alive; `out` must be writable or
 /// `NULL`.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_event_commands_next(
     iter: *mut Rm2kEventCommands,
     diagnostics: *mut Rm2kDiagnostics,
@@ -1261,7 +1260,7 @@ pub unsafe extern "C" fn rm2k_event_commands_next(
             indent: command.indent,
             param_count: command.param_count(),
             string: Rm2kBytes::new(command.string),
-            _params: Rm2kBytes::new(command.raw_params()),
+            raw_params: Rm2kBytes::new(command.raw_params()),
         };
     }
     true
@@ -1273,7 +1272,9 @@ pub unsafe extern "C" fn rm2k_event_commands_next(
 ///
 /// `command` must point to a command filled in by `rm2k_event_commands_next`, whose buffer
 /// is still alive; `out` must be writable or `NULL`.
-#[unsafe(no_mangle)]
+// LCF's integers are 32-bit signed but stored as unsigned varints; the bits are reinterpreted, as liblcf does.
+#[allow(clippy::cast_possible_wrap)]
+#[no_mangle]
 pub unsafe extern "C" fn rm2k_event_command_param(
     command: *const Rm2kEventCommand,
     index: usize,
@@ -1282,7 +1283,7 @@ pub unsafe extern "C" fn rm2k_event_command_param(
     let Some(command) = (unsafe { command.as_ref() }) else {
         return false;
     };
-    let Some(bytes) = (unsafe { slice(command._params.data, command._params.len) }) else {
+    let Some(bytes) = (unsafe { slice(command.raw_params.data, command.raw_params.len) }) else {
         return false;
     };
     let mut cursor = rm2k::Cursor::new(bytes);
@@ -1302,13 +1303,13 @@ pub unsafe extern "C" fn rm2k_event_command_param(
     false
 }
 
-// The same eight ids as `rm2k::event::path`, exposed so a C consumer can navigate by hand instead
-// of only through `rm2k_command_lists_init`. Deliberately not the full set: liblcf generates ~1200
-// chunk ids across four headers, and nothing here needs the rest.
+// The same eight ids as `rm2k::event::path`, so C can navigate by hand, not only through
+// `rm2k_command_lists_init`. Deliberately not the full set: liblcf generates ~1200 chunk ids across
+// four headers, and nothing here needs the rest.
 //
-// Literals, not `= path::X`: cbindgen only turns literal consts into `#define`s, which (unlike an
-// exported `extern const` symbol) work in a `case` label and need no `dllimport` from a Windows DLL
-// consumer. The assertions below keep them equal to the real ids.
+// Literals, not `= path::X`: cbindgen emits only literal consts as `#define`s, which (unlike an
+// exported `extern const`) work in a `case` label and need no `dllimport` from a Windows DLL. The
+// assertions below keep them equal to the real ids.
 pub mod chunk_id {
     use rm2k::event::path;
 
@@ -1340,3 +1341,6 @@ pub mod chunk_id {
         assert!(RM2K_CHUNK_TROOP_PAGE_COMMANDS == path::TROOP_PAGE_COMMANDS);
     };
 }
+
+#[cfg(test)]
+mod tests;

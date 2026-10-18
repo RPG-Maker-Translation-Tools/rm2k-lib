@@ -1,13 +1,12 @@
 //! Position tracking and chunk framing over a borrowed byte slice.
 //!
-//! Every LCF chunk is length-prefixed, so [`ChunkIter`] can slice out each field's payload as a
-//! `&'a [u8]` bounded to exactly that chunk before the field ever sees it. A field that misreads
-//! its own payload cannot walk into the next chunk's bytes, because they are not reachable from
-//! where it is looking - malformed input is contained, not just detected after the fact.
+//! Every LCF chunk is length-prefixed, so [`ChunkIter`] slices each field's payload as a
+//! `&'a [u8]` bounded to that chunk before the field sees it. A field that misreads its payload
+//! cannot reach the next chunk's bytes: malformed input is contained, not just detected.
 //!
-//! Every read goes through `slice::get`, returning `None` at the end of input. There is no
-//! `get_unchecked` and no `transmute` anywhere in the decode path: the input is untrusted, and a
-//! mispredicted branch costs less than a CVE.
+//! Every read goes through `slice::get`, returning `None` at end of input. No `get_unchecked` or
+//! `transmute` anywhere in the decode path: the input is untrusted, and a mispredicted branch
+//! costs less than a CVE.
 
 use crate::{
     diag::{DiagKind, DiagSink, Diagnostic},
@@ -18,30 +17,72 @@ use crate::{
 /// Parse-time context threaded through every read: the target engine, and where to report
 /// recoverable problems.
 ///
-/// The sink is `dyn` rather than a generic parameter on purpose. Diagnostics are the cold path,
-/// so the indirect call costs nothing measurable, while monomorphising ~70 generated `read`
-/// methods across every sink type would multiply code size for no gain. marshal-rs makes the
-/// same trade for its symbol table.
+/// It also carries the string-list entry budget for the load. Reuse one `Ctx` across several loads and
+/// they share what the earlier ones left, so a fresh `Ctx` per load is the usual pattern.
+///
+/// The sink is `dyn` on purpose: diagnostics are the cold path, so the indirect call is free in
+/// practice, while monomorphising ~70 generated `read` methods per sink type would bloat code.
+/// marshal-rs makes the same trade for its symbol table.
 pub struct Ctx<'d> {
     pub engine: Engine,
     diag: &'d mut dyn DiagSink,
+    entries: EntryBudget<'d>,
+}
+
+/// Most string-list entries one load may produce across every list it reads: 1,048,576 entries, 16 MiB
+/// on a 64-bit host. Real files sit far below it. The bound stops a crafted file from expanding
+/// loading without limit, including by repeating a chunk.
+pub(crate) const ENTRY_BUDGET: u64 = 1 << 20;
+
+/// The entries a load may still produce. The root `Ctx` owns the count. A reborrowed one borrows its
+/// parent's, so every nested struct draws on the same budget.
+enum EntryBudget<'d> {
+    Root(u64),
+    Nested(&'d mut u64),
+}
+
+impl EntryBudget<'_> {
+    fn left(&mut self) -> &mut u64 {
+        match self {
+            Self::Root(left) => left,
+            Self::Nested(left) => left,
+        }
+    }
 }
 
 impl<'d> Ctx<'d> {
     pub fn new(engine: Engine, diag: &'d mut dyn DiagSink) -> Self {
-        Self { engine, diag }
+        Self {
+            engine,
+            diag,
+            entries: EntryBudget::Root(ENTRY_BUDGET),
+        }
+    }
+
+    /// Take `count` entries from the load's string-list budget. Returns `false`, taking nothing, when
+    /// fewer remain. Only the `alloc`-gated string lists spend the budget.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    pub(crate) fn take_entries(&mut self, count: u64) -> bool {
+        let left = self.entries.left();
+        if count > *left {
+            return false;
+        }
+        *left -= count;
+        true
     }
 
     /// Reborrow for a nested struct.
     ///
-    /// Schema recursion depth is fixed by the format (four levels at most, e.g. `Database` ->
-    /// `Troop` -> `TroopPage` -> `EventCommand`), so recursive descent is safe here in a way it
-    /// would not be for an attacker-controlled shape.
+    /// Schema depth is fixed by the format (four levels at most: `Database` -> `Troop` ->
+    /// `TroopPage` -> `EventCommand`), so recursive descent is safe. It would not be for an
+    /// attacker-controlled shape.
     #[inline]
     pub fn reborrow(&mut self) -> Ctx<'_> {
         Ctx {
             engine: self.engine,
             diag: &mut *self.diag,
+            entries: EntryBudget::Nested(self.entries.left()),
         }
     }
 
@@ -346,10 +387,9 @@ impl<'a> ChunkIter<'a> {
 
     /// Consume a whole chunk stream, returning the span it occupied.
     ///
-    /// The alternative would be handing out a borrowed iterator and asking the caller to drive it
-    /// to the end before moving on - which works exactly once and silently desynchronises if they
-    /// stop early. Returning the span instead lets a caller re-walk the same element as often as
-    /// they like, and costs only a skim over the chunk headers.
+    /// A borrowed iterator would have to be driven to the end before moving on, and silently
+    /// desynchronises if the caller stops early. Returning the span lets a caller re-walk the
+    /// element any number of times, for the cost of a skim over the chunk headers.
     #[must_use]
     pub fn consume(cur: &mut Cursor<'a>, ctx: &mut Ctx<'_>, struct_name: &'static str) -> &'a [u8] {
         let start = cur.pos();
@@ -440,7 +480,7 @@ impl<'a> ChunkIter<'a> {
 pub struct ListItem<'a> {
     /// The element's id, from the compressed integer preceding its chunk stream.
     pub id: i32,
-    /// The element's chunk stream, terminator excluded.
+    /// The element's chunk stream, terminating zero included.
     pub body: &'a [u8],
     /// File-absolute offset of `body`.
     pub offset: u32,

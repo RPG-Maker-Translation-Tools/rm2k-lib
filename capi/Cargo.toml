@@ -2,6 +2,7 @@
 name = "rm2k-capi"
 version.workspace = true
 edition.workspace = true
+# thiserror's no_std build needs 1.81: below that its build.rs enables `std`, which clashes with this crate's panic handler.
 rust-version.workspace = true
 description.workspace = true
 license.workspace = true
@@ -20,7 +21,7 @@ name = "rm2k"
 
 [lib]
 name = "rm2k"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 doctest = false
 
 [features]

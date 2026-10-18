@@ -6,6 +6,9 @@
 //! mistakes, companion-chunk ordering mistakes and flag-packing mistakes, none of which show up
 //! in a value comparison.
 
+#[path = "common/samples.rs"]
+mod samples;
+
 use rm2k::{
     field::{LcfStruct, List, Packed, UnknownChunks},
     owned::IntoOwned,
@@ -217,7 +220,9 @@ fn flipping_any_single_byte_never_panics() {
     let mut bytes = Vec::new();
     file::save_database(&db, &mut bytes, Engine::R2K, SaveOpt::default(), b"").unwrap();
 
-    for index in 0..bytes.len() {
+    // Miri interprets every load, so it samples every 64th byte. Native runs flip them all.
+    let stride = if cfg!(miri) { 64 } else { 1 };
+    for index in (0..bytes.len()).step_by(stride) {
         for mask in [0x01u8, 0x80, 0xFF] {
             let mut corrupted = bytes.clone();
             corrupted[index] ^= mask;
@@ -363,4 +368,55 @@ fn a_strict_load_still_rejects_an_unrecognised_chunk() {
         rm2k::DiagSink::first(&strict).map(|d| d.kind),
         Some(rm2k::DiagKind::UnknownChunk)
     );
+}
+
+/// Runs `save` into buffers cut short at every byte, then into one that fits. A short buffer must
+/// fail with `BufferFull` at every cut, since each write needs bytes the cut does not provide. Driving
+/// every cut also drives every write's error path, which a growable `Vec` sink can never reach.
+fn fails_cleanly_at_every_cut(
+    full: &[u8],
+    save: impl Fn(&mut rm2k::sink::SliceSink<'_>) -> Result<(), rm2k::WriteError>,
+) {
+    for cut in 0..full.len() {
+        let mut buf = vec![0u8; cut];
+        let mut sink = rm2k::sink::SliceSink::new(&mut buf);
+        assert_eq!(
+            save(&mut sink),
+            Err(rm2k::WriteError::BufferFull),
+            "cut at {cut} of {}",
+            full.len()
+        );
+    }
+
+    let mut buf = vec![0u8; full.len()];
+    let mut sink = rm2k::sink::SliceSink::new(&mut buf);
+    assert_eq!(save(&mut sink), Ok(()));
+    assert_eq!(sink.as_slice(), full);
+}
+
+#[test]
+fn saves_into_a_short_buffer_fail_cleanly_at_every_cut() {
+    let db = populated_database();
+    let db_bytes = file::to_vec(|out| file::save_database(&db, out, Engine::R2K, SaveOpt::default(), b""));
+    fails_cleanly_at_every_cut(&db_bytes, |sink| {
+        file::save_database(&db, sink, Engine::R2K, SaveOpt::default(), b"")
+    });
+
+    let map_bytes = samples::map_with_events();
+    let map = file::load_map(&map_bytes).unwrap().value;
+    fails_cleanly_at_every_cut(&map_bytes, |sink| {
+        file::save_map(&map, sink, Engine::R2K, SaveOpt::default(), b"")
+    });
+
+    let tree = TreeMap::defaults(Engine::R2K);
+    let tree_bytes = file::to_vec(|out| file::save_tree_map(&tree, out, Engine::R2K, SaveOpt::default(), b""));
+    fails_cleanly_at_every_cut(&tree_bytes, |sink| {
+        file::save_tree_map(&tree, sink, Engine::R2K, SaveOpt::default(), b"")
+    });
+
+    let save = Save::defaults(Engine::R2K);
+    let save_bytes = file::to_vec(|out| file::save_save(&save, out, Engine::R2K, SaveOpt::default(), b""));
+    fails_cleanly_at_every_cut(&save_bytes, |sink| {
+        file::save_save(&save, sink, Engine::R2K, SaveOpt::default(), b"")
+    });
 }

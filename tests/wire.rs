@@ -5,7 +5,7 @@
 
 use rm2k::wire::{
     MAX_VARINT_LEN, MAX_VARINT64_LEN, decode_varint, decode_varint64, encode_varint, encode_varint64, read_f64_le,
-    read_i16_le, read_u32_le, varint_len,
+    read_i16_le, read_i32_le, read_u32_le, varint_len,
 };
 
 #[test]
@@ -102,4 +102,10 @@ fn primitives_are_little_endian() {
     assert_eq!(read_u32_le(&[0x01, 0x02, 0x03, 0x04]), Some(0x0403_0201));
     assert_eq!(read_i16_le(&[0x01]), None);
     assert_eq!(read_f64_le(&1.5f64.to_le_bytes()), Some(1.5));
+}
+
+#[test]
+fn read_i32_le_takes_four_bytes_or_nothing() {
+    assert_eq!(read_i32_le(&[0xFF, 0xFF, 0xFF, 0xFF]), Some(-1));
+    assert_eq!(read_i32_le(&[1, 0, 0]), None);
 }

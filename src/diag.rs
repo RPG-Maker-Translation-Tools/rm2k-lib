@@ -1,12 +1,11 @@
 //! Recoverable problems found while parsing.
 //!
-//! Real RPG Maker 2000/2003 files in the wild are frequently malformed - a corrupt chunk, a
-//! malformed compressed integer, an unknown field id. Parsing recovers from all of these and
-//! keeps going rather than rejecting the file, but reports what happened instead of silently
-//! swallowing it.
+//! Real RPG Maker 2000/2003 files are often malformed: a corrupt chunk, a bad compressed integer,
+//! an unknown field id. Parsing recovers and keeps going rather than rejecting the file, and
+//! reports what happened.
 //!
-//! Every recovery point pushes a [`Diagnostic`] into a caller-supplied [`DiagSink`]. Which sink
-//! you pass decides the policy, at zero runtime cost when you don't care:
+//! Every recovery point pushes a [`Diagnostic`] into a caller-supplied [`DiagSink`]. The sink
+//! decides the policy, at zero runtime cost when you don't care:
 //!
 //! | Sink | Behaviour |
 //! |---|---|
@@ -21,14 +20,13 @@ use core::fmt;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum DiagKind {
-    /// A chunk id this struct has no field for. Extremely common and usually benign: it is how
-    /// RPG Maker's own forward-compatibility works.
+    /// A chunk id this struct has no field for. Common and usually benign: it is how RPG Maker's
+    /// own forward-compatibility works.
     ///
-    /// The chunk is **kept**, not dropped - it lands in the owning struct's
-    /// [`unknown_chunks`](crate::field::LcfStruct::unknown_chunks) and is written back in the
-    /// same position, so an unrecognised id does not cost byte-exactness. This is still reported
-    /// because preserved is not understood: a caller that wants to reject such a file passes
-    /// [`StrictSink`].
+    /// The chunk is **kept** in the owning struct's
+    /// [`unknown_chunks`](crate::field::LcfStruct::unknown_chunks) and written back in place, so
+    /// byte-exactness holds. Still reported, since it is not understood; [`StrictSink`] rejects
+    /// such files.
     UnknownChunk,
     /// A chunk's payload was shorter than the field needed. The field keeps its default.
     ShortChunk,
@@ -38,13 +36,17 @@ pub enum DiagKind {
     BadVarint,
     /// A chunk declared a length running past the end of its parent. Truncated to what is left.
     ChunkOverrun,
-    /// The file's magic string did not match. liblcf warns and parses anyway
-    /// so this is recoverable rather than fatal.
+    /// The magic string did not match. liblcf warns and parses anyway, so this is recoverable.
     BadMagic,
     /// An event command list was not terminated by the expected four zero bytes.
     EventListCorrupt,
     /// A raw primitive array's payload length was not a whole multiple of the element size.
     RaggedArray,
+    /// A string list ran past the load's entry budget, so the rest of that list was dropped.
+    ///
+    /// The budget is shared by every string list in one load, so a crafted file cannot make loading
+    /// expand without limit by repeating a list. Real files stay far below it.
+    EntryBudgetExhausted,
 }
 
 impl DiagKind {
@@ -59,6 +61,7 @@ impl DiagKind {
             Self::BadMagic => "unexpected file magic",
             Self::EventListCorrupt => "event command list not terminated",
             Self::RaggedArray => "array payload not a multiple of element size",
+            Self::EntryBudgetExhausted => "string list over the load's entry budget",
         }
     }
 }
@@ -78,10 +81,9 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    /// A filler value for declaring a [`SliceSink`] buffer without an allocator.
-    ///
-    /// `SliceSink` never reads a slot it has not written, so the contents are irrelevant; this
-    /// exists only so `[Diagnostic::EMPTY; N]` is spellable in a `no_std` caller.
+    /// Filler for declaring a [`SliceSink`] buffer without an allocator. `SliceSink` never reads
+    /// an unwritten slot, so the contents do not matter; this only makes `[Diagnostic::EMPTY; N]`
+    /// spellable in `no_std`.
     pub const EMPTY: Self = Self {
         offset: 0,
         chunk_id: 0,
@@ -136,8 +138,7 @@ impl DiagSink for NullSink {
 }
 
 /// Records into a caller-supplied fixed buffer. Overflow drops the excess and bumps
-/// [`dropped`](SliceSink::dropped) rather than failing - a diagnostic sink that can itself fail
-/// would be a poor kind of diagnostic sink.
+/// [`dropped`](SliceSink::dropped) instead of failing: a diagnostic sink should not fail.
 #[derive(Debug)]
 pub struct SliceSink<'b> {
     slots: &'b mut [Diagnostic],
@@ -181,8 +182,8 @@ impl DiagSink for SliceSink<'_> {
     }
 }
 
-/// Latches the first diagnostic and asks the loader to stop. This is what "strict mode" is -
-/// no separate parser, just a different sink.
+/// Latches the first diagnostic and asks the loader to stop. That is strict mode: no separate
+/// parser, just a different sink.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StrictSink {
     first: Option<Diagnostic>,

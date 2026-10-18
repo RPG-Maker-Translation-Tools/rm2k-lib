@@ -1,10 +1,9 @@
 //! Which RPG Maker produced the file.
 //!
-//! This is not cosmetic metadata - it changes the wire format. Roughly 90 of the schema's fields
-//! exist only in RPG Maker 2003 and must be skipped entirely when writing a 2000 file, and a
-//! further set of fields have different defaults per engine, which matters because the writer
-//! elides any field equal to its default. Flag bundles are affected worst: skipping a 2003-only
-//! flag shifts every later bit in the byte.
+//! Changes the wire format, not just metadata. Roughly 90 schema fields exist only in 2003 and are
+//! skipped when writing 2000. Other fields have per-engine defaults; the writer elides fields
+//! equal to their default, so those matter too. Flag bundles suffer most: skipping a 2003-only
+//! flag shifts every later bit.
 
 /// The engine a file targets.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

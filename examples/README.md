@@ -14,7 +14,7 @@ Each file is reported as `EXACT`, `DIFFERS` (parsed, but the output differs; the
 
 ## `dump_text.rs`
 
-Prints every message string from a game using only the allocation-free core tier: `CommandLists` and `EventCommandIter` hand back spans into the file buffer. Strings print as escaped raw bytes, since LCF records no encoding (see [Strings](../README.md#strings)).
+Prints every message and choice string in a game's maps (`.lmu` files). Common events and battle events in the database are not scanned. It walks each map's event commands with `CommandLists` and `EventCommandIter`, which hand back spans into the file buffer, but it still loads each map with `file::load_map` to find the body, so this example allocates. Strings print as escaped raw bytes, since LCF records no encoding (see [Strings](../README.md#strings)).
 
 ```bash
 cargo run --release --example dump_text -- "/path/to/game"

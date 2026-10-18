@@ -1,7 +1,7 @@
 //! Regression tests for what fuzzing (`fuzz/`) found: hostile input that used to allocate gigabytes
 //! or loop for billions of iterations, and must be an ordinary bounded result instead.
 
-use rm2k::{field::LcfField, wire, Ctx, Engine, EventCommandIter, EventCommandList, NullSink};
+use rm2k::{Ctx, Engine, EventCommandIter, EventCommandList, NullSink, field::LcfField, wire};
 
 fn varint(value: u32) -> Vec<u8> {
     let mut out = Vec::new();
@@ -60,4 +60,28 @@ fn honest_commands_are_unchanged() {
     let commands = EventCommandList::read(&list, &mut ctx, "test", 0);
 
     assert_eq!(commands[0].parameters, [1, 2, 3]);
+}
+
+/// Code 0 is only ever the list terminator. A command whose code decodes to 0 some other way -
+/// an overlong or non-canonical encoding - used to be kept, and written back as a terminator, so
+/// the next load stopped there and lost everything after it.
+#[test]
+fn a_zero_code_that_is_not_the_terminator_ends_the_list_and_is_stable() {
+    // One honest command, then a code of 0 spelled in seven bytes (over the 5-byte cap), then the
+    // terminator.
+    let overlong = [1, 0, 0, 0, 0x81, 0x9D, 0x80, 0x9B, 0xA7, 0xFC, 0x1E, 0, 0, 0, 0];
+    // The same, with the zero spelled as the non-canonical pair `0x80 0x00`.
+    let non_canonical = [1, 0, 0, 0, 0x80, 0x00, 0, 0, 0, 0];
+
+    for list in [&overlong[..], &non_canonical[..]] {
+        let mut sink = NullSink;
+        let mut ctx = Ctx::new(Engine::R2K, &mut sink);
+        let first = EventCommandList::read(list, &mut ctx, "test", 0);
+        assert_eq!(first.len(), 1, "only the honest command survives");
+
+        let mut written = Vec::new();
+        first.write(&mut written, Engine::R2K).unwrap();
+        let second = EventCommandList::read(&written, &mut ctx, "test", 0);
+        assert_eq!(second, first, "saving and reloading must not change the list");
+    }
 }

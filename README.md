@@ -1,13 +1,13 @@
 # rm2k-lib
 
-Reads and writes the binary formats RPG Maker 2000 and 2003 use: `LDB` (database), `LMU` (map), `LMT` (map tree) and `LSD` (save). A from-scratch Rust rewrite of [liblcf](https://github.com/EasyRPG/liblcf), built around three goals: run free-standing under `no_std`, be perfectly round-trip, be **BLAZINGLY :crab: FAST :fire::fire:**
+Reads and writes the binary formats RPG Maker 2000 and 2003 use: `LDB` (database), `LMU` (map), `LMT` (map tree) and `LSD` (save). A from-scratch Rust rewrite of [liblcf](https://github.com/EasyRPG/liblcf), built around three goals: run free-standing under `no_std`, be perfectly round-trip, be **BLAZINGLY 🦀 FAST 🔥🔥**
 
 Round-trip correctness is verified byte-for-byte against real RPG Maker games - see [Verification](#verification) below.
 
-This crate has some ports:
+Ports:
 
 - [C API](./capi/) - C bindings, installable via `cargo-c`.
-- [WASM](./wasm/) - WASM bindings generated from Rust code.
+- [WASM](./wasm/) - WebAssembly bindings.
 
 ## Installation
 
@@ -21,8 +21,8 @@ cargo add rm2k-lib
 | ----------------- | ---------------- | -------------------------------------------------------------------------------------------------------------- |
 | _(none)_          | nothing          | The wire codec, chunk framing, and allocation-free event iteration. Runs on `no_std` with no allocator at all. |
 | `alloc`           | `alloc`          | Typed structs - `Database`, `Map`, `TreeMap`, `Save` - and loading/saving them.                                |
-| `std` _(default)_ | `std`            | [`IoSink`](https://docs.rs/rm2k-lib/latest/rm2k/sink/struct.IoSink.html) over `std::io::Write`.                |
-| `serde`           | `alloc`, `serde` | `Serialize`/`Deserialize` on every one of the 69 schema structs.                                               |
+| `std` _(default)_ | `alloc`, `std`   | [`IoSink`](https://docs.rs/rm2k-lib/latest/rm2k/sink/struct.IoSink.html) over `std::io::Write`.                |
+| `serde`           | `alloc`, `serde` | `Serialize`/`Deserialize` on every schema struct, enum and flag bundle. See [Serde](#serde).                                               |
 
 ## Quick example
 
@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Strings
 
-**This crate never transcodes text, and never guesses an encoding.** RPG Maker 2k/3 stores strings in whatever legacy codepage the authoring machine used - Shift-JIS for Japanese games, CP1252 for western ones - and an LCF file contains no marker recording which. So strings come out as `&[u8]`, exactly as they sit in the file. Decode with `encoding_rs`, `iconv`, `ICU uconv`, Microsoft's ICU or whatever you prefer once you know the codepage, typically from `RPG_RT.ini`'s `[EasyRPG] Encoding` key.
+**This crate never transcodes text, and never guesses an encoding.** RPG Maker 2k/3 stores strings in whatever legacy codepage the authoring machine used - Shift-JIS for Japanese games, CP1252 for western ones - and an LCF file contains no marker recording which. So strings come out as `&[u8]`, exactly as they sit in the file. Decode with whatever you prefer once you know the codepage, typically from `RPG_RT.ini`'s `[EasyRPG] Encoding` key.
 
 ## Leniency
 
@@ -50,20 +50,24 @@ Real files are frequently malformed and RPG Maker itself loads them anyway, so t
 
 **Chunks this schema does not know are kept, not dropped.** RPG Maker's forward-compatibility story is "write chunks the reader may not understand", so real files carry ids from later `RPG_RT` builds, EasyRPG extensions and third-party editors. Each one is stored verbatim in its struct's `unknown_chunks`, anchored next to the last field that _was_ recognised, and written back in that position - so byte-exactness does not depend on the schema being complete. They are still reported as `DiagKind::UnknownChunk`; preserved is not understood.
 
+## Serde
+
+With the `serde` feature, the schema's structs, enums and flag bundles derive `Serialize` and `Deserialize`, so any serde format can read and write a loaded file. The [`rm2k-wasm`](./wasm/) bindings and the [`to_yaml`](examples/to_yaml.rs) example both use it. Each struct becomes an object keyed by its schema field names (`system.system_name`), each list becomes an array, and each string becomes escaped text: printable ASCII stays as-is, `\` becomes `\\`, and every other byte becomes `\xNN`. Human-readable formats (JSON, YAML, WASM's JS values) get that text; binary formats get the raw bytes. [`src/serde/mod.rs`](src/serde/mod.rs) has the full rules.
+
 ## Examples
 
-| Example                                                                      | What it shows                                                                                                                                                                  |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`examples/fixture_check.rs`](examples/fixture_check.rs)                     | Byte-exact round-trip checking against real game files on disk.                                                                                                                |
-| [`examples/dump_text.rs`](examples/dump_text.rs)                             | Extracting every displayed string using only the allocation-free core tier.                                                                                                    |
-| [`examples/to_yaml.rs`](examples/to_yaml.rs)                                 | Converting a database to YAML with the `serde` tier (`cargo run --example to_yaml --features serde -- game.ldb`).                                                              |
-| [`capi/examples/to_json.c`](capi/examples/to_json.c) | Converting a database's named lists to JSON from C (via [yyjson](https://github.com/ibireme/yyjson), vendored next to the example), using only the C API's owned/"alloc" tier. |
+| Example                                                  | What it shows                                                                                                                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`examples/fixture_check.rs`](examples/fixture_check.rs) | Byte-exact round-trip checking against real game files on disk.                                                                                                                |
+| [`examples/dump_text.rs`](examples/dump_text.rs)         | Listing the message and choice strings in each map's event commands. The event walk borrows from the file buffer, but each map is still loaded to read its header.                                                                                                    |
+| [`examples/to_yaml.rs`](examples/to_yaml.rs)             | Converting a database to YAML with the `serde` tier (`cargo run --example to_yaml --features serde -- game.ldb`).                                                              |
+| [`capi/examples/to_json.c`](capi/examples/to_json.c)     | Converting a database's named lists to JSON from C (via [yyjson](https://github.com/ibireme/yyjson), vendored next to the example), using only the C API's owned/"alloc" tier. |
 
 Each example has its own README with usage, output semantics, and (for the C ones) build steps: [`examples/README.md`](examples/README.md) for the Rust examples, [`capi/examples/README.md`](capi/examples/README.md) for `to_json.c`. Run a Rust example with `cargo run --release --example <name> [--features ...] -- <args>`; the C example is not wired into Cargo.
 
 ## Verification
 
-[`examples/fixture_check.rs`](examples/fixture_check.rs) ([usage](examples/README.md)) loads every `.ldb`/`.lmu`/`.lmt`/`.lsd` file in a directory, writes it straight back out, and compares bytes. Run against three real, unmodified RPG Maker games (RPG Maker 2000 and 2003, 419 files across all four formats): **419/419 byte-exact, zero diagnostics**. The C API gets the same treatment independently in [`capi/tests/test_ffi.c`](capi/tests/test_ffi.c) ([build steps](capi/tests/README.md)), round-tripping a real 262 KB database through the FFI boundary byte-for-byte.
+[`examples/fixture_check.rs`](examples/fixture_check.rs) ([usage](examples/README.md)) loads every `.ldb`/`.lmu`/`.lmt`/`.lsd` file in a directory, writes it straight back out, and compares bytes. Run against three real, unmodified RPG Maker games (RPG Maker 2000 and 2003, 419 files across all four formats): **419/419 byte-exact, zero diagnostics**. The C API gets the same treatment independently in [`capi/tests/test_c_api.c`](capi/tests/test_c_api.c) ([build steps](capi/tests/README.md)), round-tripping a real 262 KB database through the FFI boundary byte-for-byte.
 
 The games in question:
 
@@ -71,7 +75,7 @@ The games in question:
 - [Red Tide](https://rpgmaker.net/games/12992/)
 - [Metamorphosis](https://rpgmaker.net/games/12270/)
 
-[`benches/`](benches) has a real, measured comparison against liblcf: parsing `RPG_RT.ldb` is **~6.2x faster**, and parsing a `.lmu` map file is **~8.8x faster** (AMD Ryzen 5 2600, in-memory parse only, see [`benches/README.md`](benches/README.md) for the full methodology, build steps, and raw numbers). Not that it matters much, the goal was not to surpass `liblcf` by performance or something.
+[`benches/`](https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/tree/main/benches) has a real, measured comparison against liblcf: parsing `RPG_RT.ldb` is **~6.2x faster**, and parsing a `.lmu` map file is **~8.8x faster** (AMD Ryzen 5 2600, in-memory parse only, see [`benches/README.md`](https://github.com/RPG-Maker-Translation-Tools/rm2k-lib/blob/main/benches/README.md) for the full methodology, build steps, and raw numbers). Speed was not the goal, though.
 
 ## Design notes
 
@@ -87,12 +91,6 @@ Most of the RPG Maker 2k/3 format handling was written referencing [liblcf](http
 
 [yyjson](https://github.com/ibireme/yyjson) (`yyjson.h`/`yyjson.c`, MIT licensed) is vendored in [`capi/examples/yyjson`](capi/examples) for the `to_json.c` example, its license is alongside it.
 
-## NPM
-
-I won't be continuing to publish the WASM bindings ([`rm2k-wasm`](./wasm/)) on NPM. NPM has made their 2FA completely unbearable, and I don't want to participate in this logging-in shitshow anymore.
-
-I'm looking for the first person I meet to whom I'll pass the ownership of the package on NPM, if they're willing to maintain it. Until then, you can always build the bindings from source.
-
 ## Support
 
 [Me](https://github.com/savannstm), the maintainer of this project, is a poor college student from Eastern Europe.
@@ -106,4 +104,4 @@ Even if you don't, we will still continue working on the project anyways.
 
 ## License
 
-Project is licensed under [WTFPL](https://www.wtfpl.net/).
+Licensed under [WTFPL](https://www.wtfpl.net/).

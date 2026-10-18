@@ -1,14 +1,12 @@
 //! Codecs for the handful of types that do not fit the chunked-struct shape.
 //!
-//! These are fixed-layout structs
-//! with no chunk framing at all ([`Rect`], [`Equipment`], [`Parameters`]), and a few field kinds
-//! whose encoding is too irregular for the schema macro ([`EventCommandList`],
-//! [`MoveCommandList`], [`StrList`], [`EmptyBlock`], [`DatabaseVersion`]).
+//! Fixed-layout structs with no chunk framing ([`Rect`], [`Equipment`], [`Parameters`]), and field
+//! kinds too irregular for the schema macro ([`EventCommandList`], [`MoveCommandList`],
+//! [`StrList`], [`EmptyBlock`], [`DatabaseVersion`]).
 //!
-//! [`EventCommandList`] and [`MoveCommandList`] are the owning counterparts to the borrowing
-//! iterators in [`crate::event`], which is where the actual framing rules are documented. A
-//! caller that only wants to *read* commands should prefer those: they work in the core tier and
-//! copy nothing.
+//! [`EventCommandList`] and [`MoveCommandList`] own what the borrowing iterators in
+//! [`crate::event`] walk, and document the framing rules. To only *read* commands, prefer those:
+//! they work in the core tier and copy nothing.
 
 use crate::{
     cursor::{Ctx, Cursor},
@@ -23,10 +21,9 @@ use alloc::vec::Vec;
 
 /// A chunk that exists but carries nothing.
 ///
-/// Three chunks in `Database` are declared but unused (`commoneventD2`, `commoneventD3`,
-/// `classD1`, all 2003-only). RPG Maker writes them as a header with a zero length, and files
-/// round-trip only if they are written back the same way - hence a real type rather than simply
-/// omitting them from the schema.
+/// Three unused 2003-only `Database` chunks (`commoneventD2`, `commoneventD3`, `classD1`). RPG
+/// Maker writes them as a zero-length header, and files round-trip only if written back the same
+/// way, hence a real type rather than omitting them from the schema.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct EmptyBlock;
 
@@ -199,9 +196,8 @@ impl<'a> LcfField<'a> for Equipment {
 
 /// Six parallel stat curves, stored end to end with no separators.
 ///
-/// The payload is split six ways by length: each curve gets `len / 6` bytes. There is nothing in the encoding
-/// that says how long a curve is, so a payload that is not a multiple of twelve silently loses its tail -
-/// as it does in liblcf.
+/// The payload is split six ways: each curve gets `len / 6` bytes. The encoding gives no curve
+/// length, so a payload not a multiple of twelve silently loses its tail, as in liblcf.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Parameters {
     pub maxhp: Packed<i16>,
@@ -355,7 +351,7 @@ impl<'a> LcfField<'a> for EventCommandList<'a> {
 /// One move-route command, owning its string.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MoveCommand<'a> {
-    /// The command code. See [`move_code`](crate::event::move_code).
+    /// The command code. See [`move_code`].
     pub code: i32,
     /// The string operand, verbatim; empty for codes that carry none.
     pub string: DbStr<'a>,
@@ -464,16 +460,16 @@ impl<'a> LcfField<'a> for MoveCommandList<'a> {
 
 /// A sparse list of strings, run-length encoded over its empty entries.
 ///
-/// The oddest encoding in the format, and the only reason a 64-bit compressed integer exists at
-/// all. Each entry is a length followed by that many bytes - but a length **above `u32::MAX`**
-/// is not a length at all: it is the sentinel `0x8_0000_0000 - gap`, meaning "skip `gap` empty
-/// entries". Used by exactly one field in the schema, an EasyRPG extension to `SaveSystem`.
+/// The oddest encoding in the format, and the only reason a 64-bit compressed integer exists.
+/// Each entry is a length followed by that many bytes, but a length **above `u32::MAX`** is the
+/// sentinel `0x8_0000_0000 - gap`, meaning "skip `gap` empty entries". Used by one field: an
+/// EasyRPG extension to `SaveSystem`.
 ///
-/// The encoding does not actually save space for short runs, and liblcf uses it anyway. Because
-/// the sentinel is `2^35 - gap`, it needs all five bytes of a compressed integer no matter how
-/// small the gap, while the empty entries it replaces would have cost one byte each - so a run
-/// shorter than six *grows*. Reproduced regardless: the goal is byte-identical output, not a
-/// better encoding.
+/// It does not save space on short runs, and liblcf uses it anyway. The sentinel always needs all
+/// five bytes while each empty entry it replaces costs one, so a run shorter than six *grows*.
+/// Reproduced regardless: the goal is byte-identical output.
+///
+/// Loading stops once the load's string-list entry budget runs out, reporting `EntryBudgetExhausted`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct StrList<'a>(pub Vec<DbStr<'a>>);
 
@@ -505,25 +501,28 @@ impl<'a> LcfField<'a> for StrList<'a> {
             };
 
             if marker.value > u64::from(u32::MAX) {
-                // A gap: extend with empty entries rather than storing them.
+                // A gap: extend with empty entries rather than storing them. The run's length is not compared
+                // with the chunk's: the writer compresses runs, so a long run can be longer than its compressed
+                // chunk. A marker at or past `GAP_BASE` names an empty run, which the writer never emits.
                 let gap = GAP_BASE.saturating_sub(marker.value);
-                // Bounded so a hostile marker cannot ask for a huge allocation.
-                let Ok(gap) = usize::try_from(gap) else {
-                    ctx.report(owner, id, cur.offset(), DiagKind::BadVarint);
-                    break;
-                };
-                let Some(target) = out.len().checked_add(gap) else {
-                    ctx.report(owner, id, cur.offset(), DiagKind::BadVarint);
-                    break;
-                };
-                if gap > data.len() {
+                if gap == 0 {
                     ctx.report(owner, id, cur.offset(), DiagKind::BadVarint);
                     break;
                 }
-                out.resize(target, DbStr::default());
+                if !ctx.take_entries(gap) {
+                    ctx.report(owner, id, cur.offset(), DiagKind::EntryBudgetExhausted);
+                    break;
+                }
+                // `take_entries` succeeded, so `gap` is at most `ENTRY_BUDGET`, which fits any `usize`.
+                out.resize(out.len() + gap as usize, DbStr::default());
                 continue;
             }
 
+            // Charged before the bytes are read: any failure below ends the loop, so at most one unit is wasted.
+            if !ctx.take_entries(1) {
+                ctx.report(owner, id, cur.offset(), DiagKind::EntryBudgetExhausted);
+                break;
+            }
             let Some(bytes) = cur.take(marker.value as usize) else {
                 ctx.report(owner, id, cur.offset(), DiagKind::ShortChunk);
                 break;

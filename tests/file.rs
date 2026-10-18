@@ -4,7 +4,8 @@ use rm2k::{
     Engine, LcfStruct, ReadError, SaveOpt,
     diag::{DiagKind, Diagnostic},
     file::{
-        load_database, load_database_with, load_map, load_save, load_tree_map, save_database, save_map, save_tree_map,
+        load_database, load_database_with, load_map, load_save, load_tree_map, load_tree_map_with, save_database,
+        save_map, save_tree_map,
     },
     rpg::{Database, Map, TreeMap},
     wire,
@@ -100,4 +101,37 @@ fn a_tree_map_round_trips() {
     let loaded = load_tree_map(&buf).unwrap();
     assert_eq!(loaded.header, wire::LMT_HEADER);
     assert_eq!(loaded.value, tree);
+}
+
+#[test]
+fn a_loaded_value_derefs_to_its_contents() {
+    let db = Database::defaults(Engine::R2K);
+    let mut buf = Vec::new();
+    save_database(&db, &mut buf, Engine::R2K, SaveOpt::default(), b"").unwrap();
+    let loaded = load_database(&buf).unwrap();
+    assert_eq!(loaded.system, db.system);
+}
+
+#[test]
+fn a_tree_map_with_a_bad_magic_is_reported_but_still_parses() {
+    let tree = TreeMap::defaults(Engine::R2K);
+    let mut buf = Vec::new();
+    let opt = SaveOpt { preserve_header: true };
+    save_tree_map(&tree, &mut buf, Engine::R2K, opt, b"Bogus").unwrap();
+
+    let mut diag: Vec<Diagnostic> = Vec::new();
+    let loaded = load_tree_map_with(&buf, &mut diag).unwrap();
+    assert_eq!(loaded.header, b"Bogus");
+    assert_eq!(diag[0].kind, DiagKind::BadMagic);
+    assert_eq!(loaded.value, tree);
+}
+
+#[test]
+fn to_vec_collects_exactly_what_the_save_writes() {
+    let db = Database::defaults(Engine::R2K);
+    let mut direct = Vec::new();
+    save_database(&db, &mut direct, Engine::R2K, SaveOpt::default(), b"").unwrap();
+
+    let via = rm2k::file::to_vec(|out| save_database(&db, out, Engine::R2K, SaveOpt::default(), b""));
+    assert_eq!(via, direct);
 }

@@ -1,9 +1,8 @@
 //! Allocation-free iteration over event and move-route command lists.
 //!
-//! [`EventCommandIter`] and [`MoveCommandIter`] walk a command list and hand back each command
-//! as a borrowed view into the input buffer - no `Vec`, no string copies, usable with no
-//! allocator at all. This is the tool for an embedded consumer that just needs to walk a map's
-//! events, match on command codes, and read strings.
+//! [`EventCommandIter`] and [`MoveCommandIter`] walk a command list, handing back each command as
+//! a borrowed view into the input buffer: no `Vec`, no string copies, no allocator. For embedded
+//! consumers that walk a map's events, match command codes, and read strings.
 //!
 //! Event command lists are the format's oddest corner. They carry **no element count and no
 //! length prefix of their own** - the list ends at four consecutive zero bytes, which is what a
@@ -41,8 +40,8 @@ pub struct EventCommandRef<'a> {
 impl<'a> EventCommandRef<'a> {
     /// Iterate the command's integer parameters.
     ///
-    /// Decoded on demand rather than collected: most consumers look at one or two parameters of
-    /// the handful of command codes they care about, and never touch the rest.
+    /// Decoded on demand, not collected: most consumers read one or two parameters of the few
+    /// codes they care about, and never touch the rest.
     #[must_use]
     #[inline]
     pub const fn params(&self) -> ParamIter<'a> {
@@ -54,19 +53,17 @@ impl<'a> EventCommandRef<'a> {
 
     /// The parameter at `index`, or `None` if the command has fewer.
     ///
-    /// `O(index)`, because compressed integers are not fixed width and cannot be indexed
-    /// directly. Fine for the small indices real code uses; iterate with
-    /// [`params`](EventCommandRef::params) if you want them all.
+    /// `O(index)`: compressed integers are not fixed width, so there is no direct indexing. Fine
+    /// for the small indices real code uses; iterate [`params`](EventCommandRef::params) for all.
     #[must_use]
     #[inline]
     pub fn param(&self, index: usize) -> Option<i32> {
         self.params().nth(index)
     }
 
-    /// How many parameters the command holds. A command whose header declares more than the
-    /// payload has room for reports only the ones present (and a
-    /// [`DiagKind::ShortChunk`](crate::diag::DiagKind::ShortChunk)), so this is always safe to
-    /// size a buffer from.
+    /// How many parameters the command holds. A header declaring more than the payload has room
+    /// for reports only those present (plus a [`DiagKind::ShortChunk`]),
+    /// so this is always safe to size a buffer from.
     #[must_use]
     #[inline]
     pub const fn param_count(&self) -> u32 {
@@ -75,9 +72,8 @@ impl<'a> EventCommandRef<'a> {
 
     /// The undecoded parameter bytes.
     ///
-    /// For callers that need to carry the parameters somewhere before decoding them - the C API
-    /// hands this span back so a later `rm2k_event_command_param` can decode on demand without
-    /// keeping the iterator alive.
+    /// For carrying the parameters somewhere before decoding them. The C API returns this span so
+    /// `rm2k_event_command_param` can decode on demand without keeping the iterator alive.
     #[must_use]
     #[inline]
     pub const fn raw_params(&self) -> &'a [u8] {
@@ -117,7 +113,7 @@ impl ExactSizeIterator for ParamIter<'_> {}
 /// Walks an event command list.
 ///
 /// Not an [`Iterator`], for the same reason as
-/// [`ChunkIter`](crate::cursor::ChunkIter): advancing needs a [`Ctx`] to report recovery into,
+/// [`ChunkIter`]: advancing needs a [`Ctx`] to report recovery into,
 /// and `Iterator::next` has nowhere to put one.
 #[derive(Clone, Debug)]
 pub struct EventCommandIter<'a> {
@@ -164,6 +160,13 @@ impl<'a> EventCommandIter<'a> {
             self.recover(ctx, offset);
             return None;
         };
+        // Only the terminator carries code 0, and it was caught above by its first byte. Any other
+        // route to 0 (an overlong or non-canonical encoding) would be written back as that
+        // terminator and cut the list short on the next load, so the list ends here instead.
+        if code.value == 0 {
+            self.recover(ctx, offset);
+            return None;
+        }
         let Some(indent) = self.cur.varint() else {
             self.recover(ctx, offset);
             return None;
@@ -177,12 +180,12 @@ impl<'a> EventCommandIter<'a> {
             return None;
         };
 
-        // Parameters are compressed integers, so their extent has to be found by scanning. Doing
-        // it once here keeps `ParamIter` a plain decode with no bounds bookkeeping.
+        // Parameters are compressed integers, so their extent is found by scanning, once here. That
+        // keeps `ParamIter` a plain decode with no bounds bookkeeping.
         //
-        // The count is the file's claim: a command can declare billions of parameters
-        // in a few bytes, and `ParamIter` is exact-size, so a caller that collects it would try to
-        // allocate for all of them. Only the parameters actually present are counted.
+        // The count is the file's claim: a command can declare billions of parameters in a few
+        // bytes, and `ParamIter` is exact-size, so collecting it would allocate for all of them.
+        // Only parameters actually present are counted.
         let params_start = self.cur.pos();
         let mut present = 0;
         while present < param_count.value {
@@ -206,7 +209,7 @@ impl<'a> EventCommandIter<'a> {
 
     /// Resynchronize after a malformed command.
     ///
-    /// There is nothing better available than scan forward for 4 zero bytes: the list has no framing to fall back on.
+    /// The list has no framing to fall back on, so scan forward for 4 zero bytes.
     fn recover(&mut self, ctx: &mut Ctx<'_>, offset: u32) {
         ctx.report("EventCommand", 0, offset, DiagKind::EventListCorrupt);
         let mut zeros = 0;
@@ -222,9 +225,8 @@ impl<'a> EventCommandIter<'a> {
 
 /// One move-route command, borrowed from the input buffer.
 ///
-/// Unlike an event command, a move command's payload shape is decided by its own code:
-/// most codes carry nothing at all, two carry one integer, and
-/// two carry a string followed by one or three integers.
+/// Unlike an event command, a move command's payload shape depends on its own code: most codes
+/// carry nothing, two carry one integer, and two carry a string followed by one or three integers.
 #[derive(Clone, Debug, Default)]
 pub struct MoveCommandRef<'a> {
     /// The command code. See [`move_code`] for the ones that carry operands.
@@ -241,8 +243,8 @@ pub struct MoveCommandRef<'a> {
 
 /// The move-route command codes whose payload is not empty.
 ///
-/// Only these four change how many bytes a move command occupies, which is why they are the only
-/// ones the codec needs to name.
+/// Only these four change how many bytes a move command occupies, so they are the only ones the
+/// codec names.
 pub mod move_code {
     /// Turns a switch on; carries one integer.
     pub const SWITCH_ON: i32 = 32;
@@ -323,7 +325,7 @@ impl<'a> MoveCommandIter<'a> {
     }
 }
 
-/// Encoded length of one event command, including its four-byte terminator contribution of zero.
+/// Encoded length of one event command.
 ///
 /// Exposed so a caller sizing a buffer for [`SliceSink`](crate::sink::SliceSink) can do it
 /// without allocating.
@@ -342,13 +344,13 @@ pub fn event_command_len(code: i32, indent: i32, string_len: usize, params: &[i3
 
 /// The chunk ids on the route from a file root down to a command list.
 ///
-/// Reaching an event command means walking `Map` -> `Event` -> `EventPage` -> commands, and the core
-/// tier has no typed structs to do it with - those need `alloc`. Rather than make an embedded
-/// caller hardcode four magic numbers, the handful actually on that route are named here.
+/// Reaching an event command means walking `Map` -> `Event` -> `EventPage` -> commands. The core
+/// tier has no typed structs for that (they need `alloc`), so the few ids on the route are named
+/// here rather than hardcoded by callers.
 ///
 /// Deliberately not the full set: liblcf generates 2 960 lines of chunk-id enums across four
-/// `chunks.h` files, and nothing in the core tier needs the other ~1 190 ids. If you are reaching
-/// for a chunk that is not here, you want the `alloc` tier's typed structs instead.
+/// `chunks.h` files, and nothing in the core tier needs the other ~1 190 ids. For any other chunk,
+/// use the `alloc` tier's typed structs.
 pub mod path {
     /// `Map::events` - a list of `Event`.
     pub const MAP_EVENTS: u32 = 0x51;
@@ -386,8 +388,8 @@ pub struct CommandListAt<'a> {
 impl<'a> CommandListAt<'a> {
     /// Walk the commands.
     ///
-    /// Not called `iter`: the result is not an [`Iterator`], because advancing needs a [`Ctx`] to
-    /// report recovery into and `Iterator::next` has nowhere to put one.
+    /// Not `iter`: the result is not an [`Iterator`], since advancing needs a [`Ctx`] to report
+    /// recovery into.
     #[must_use]
     #[inline]
     pub const fn commands(&self) -> EventCommandIter<'a> {
@@ -406,10 +408,10 @@ enum Shape {
 
 /// Finds every event command list under a file root, without allocating.
 ///
-/// This is the piece that makes the core tier usable for real work. liblcf cannot express it at
-/// all: reaching one map's commands there means parsing the entire `rpg::Map` into `std::vector`s
-/// first, copying every string in the file on the way. Here the whole traversal is spans into the
-/// caller's buffer, so it runs on a microcontroller against a memory-mapped file.
+/// What makes the core tier usable for real work. liblcf cannot express it: reaching one map's
+/// commands means parsing the whole `rpg::Map` into `std::vector`s, copying every string. Here the
+/// traversal is spans into the caller's buffer, so it runs on a microcontroller against a
+/// memory-mapped file.
 ///
 /// ```
 /// # use rm2k::{event::CommandLists, Ctx, Engine, NullSink};
@@ -436,8 +438,8 @@ pub struct CommandLists<'a> {
 impl<'a> CommandLists<'a> {
     /// Every command list in a map, from its root chunk stream.
     ///
-    /// `body` is the map's chunk stream - what
-    /// [`load_map`](crate::file::load_map) parses, minus the file header.
+    /// `body` is the map's chunk stream: what [`load_map`](crate::file::load_map) parses, minus the
+    /// file header.
     #[must_use]
     pub fn in_map(body: &'a [u8], base: u32, ctx: &mut Ctx<'_>) -> Self {
         Self::start(

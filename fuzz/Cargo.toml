@@ -7,10 +7,6 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
-[dependencies]
-libfuzzer-sys = "0.4"
-rm2k-lib = { path = ".." }
-
 [workspace]
 [[bin]]
 name = "ldb"
@@ -47,4 +43,21 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "capi"
+path = "fuzz_targets/capi.rs"
+test = false
+doc = false
+bench = false
 
+[[bin]]
+name = "owned"
+path = "fuzz_targets/owned.rs"
+test = false
+doc = false
+bench = false
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+rm2k-lib = { path = ".." }
+rm2k_capi = { package = "rm2k-capi", path = "../capi" }

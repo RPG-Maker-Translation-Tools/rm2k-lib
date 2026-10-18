@@ -7,6 +7,20 @@
 static int failures = 0;
 static int checks = 0;
 
+/* The allocator a no_std build needs. Every build registers it first, so both run the same path; the
+ * std build ignores it. malloc's alignment covers every align the library asks for.
+ */
+static uint8_t* test_alloc(size_t size, size_t align) {
+    if (align > 16) return NULL;
+    return malloc(size ? size : 1);
+}
+
+static void test_free(uint8_t* ptr, size_t size, size_t align) {
+    (void)size;
+    (void)align;
+    free(ptr);
+}
+
 #define CHECK(cond) \
     do { \
         checks++; \
@@ -79,6 +93,65 @@ static void test_chunk_ids_are_exported(void) {
     CHECK(RM2K_CHUNK_EVENT_PAGES == 0x05);
     CHECK(RM2K_CHUNK_EVENT_PAGE_COMMANDS == 0x34);
     CHECK(RM2K_CHUNK_DATABASE_TROOPS == 0x0F);
+}
+
+static void test_engine_follows_the_ldb_id(void) {
+    CHECK(rm2k_engine_from_ldb_id(2003) == RM2K_ENGINE_R2K3);
+    CHECK(rm2k_engine_from_ldb_id(2000) == RM2K_ENGINE_R2K);
+}
+
+static void test_split_header_and_chunks(void) {
+    /* A length-prefixed "LcfMapUnit", then one chunk (id 11, payload "z") and the terminator. */
+    static const uint8_t bytes[] = { 10, 'L', 'c', 'f', 'M', 'a', 'p', 'U', 'n', 'i', 't', 0x0B, 0x01, 'z', 0x00 };
+    Rm2kBytes header, body;
+    CHECK(rm2k_split_header(bytes, sizeof bytes, &header, &body));
+    CHECK(header.len == 10);
+    CHECK(memcmp(header.data, "LcfMapUnit", 10) == 0);
+    CHECK(body.len == 4);
+
+    Rm2kChunk chunk;
+    CHECK(rm2k_chunk_find(body.data, body.len, 0, 0x0B, NULL, &chunk));
+    /* The payload follows the id and length bytes, so it sits at file offset 2. */
+    CHECK(chunk.offset == 2);
+    CHECK(chunk.data.len == 1 && chunk.data.data[0] == 'z');
+    CHECK(!rm2k_chunk_find(body.data, body.len, 0, 0x0C, NULL, &chunk));
+
+    Rm2kChunkIter iter;
+    CHECK(rm2k_chunk_iter_init(&iter, body.data, body.len, 0));
+    CHECK(rm2k_chunk_iter_next(&iter, NULL, &chunk));
+    CHECK(chunk.id == 0x0B);
+    CHECK(!rm2k_chunk_iter_next(&iter, NULL, &chunk));
+}
+
+static void test_overrun_chunk_is_cut_short_and_reported(void) {
+    /* The chunk claims 9 bytes, but only 1 follows. */
+    static const uint8_t body[] = { 0x0B, 0x09, 'a' };
+    Rm2kDiagnostics* diag = rm2k_diagnostics_new();
+
+    Rm2kChunkIter iter;
+    Rm2kChunk chunk;
+    CHECK(rm2k_chunk_iter_init(&iter, body, sizeof body, 0));
+    CHECK(rm2k_chunk_iter_next(&iter, diag, &chunk));
+    CHECK(chunk.data.len == 1);
+    CHECK(!rm2k_chunk_iter_next(&iter, diag, &chunk));
+
+    CHECK(rm2k_diagnostics_count(diag) == 1);
+    Rm2kDiagnostic reported;
+    CHECK(rm2k_diagnostics_get(diag, 0, &reported));
+    CHECK(reported.kind == RM2K_DIAG_CHUNK_OVERRUN);
+    rm2k_diagnostics_free(diag);
+}
+
+static void test_list_walker_yields_each_element(void) {
+    /* Count 1, then element id 5 holding chunk 11 with payload "z". */
+    static const uint8_t body[] = { 0x01, 0x05, 0x0B, 0x01, 'z', 0x00 };
+    Rm2kListWalker walker;
+    CHECK(rm2k_list_walker_init(&walker, body, sizeof body, 0, NULL));
+
+    Rm2kListItem item;
+    CHECK(rm2k_list_walker_next(&walker, NULL, &item));
+    CHECK(item.id == 5);
+    CHECK(!rm2k_list_walker_next(&walker, NULL, &item));
 }
 
 /* --------------------------------------------------------------------------------------------
@@ -202,6 +275,7 @@ static void test_zero_copy_walk(const char* path) {
 }
 
 int main(int argc, char** argv) {
+    rm2k_set_allocator(test_alloc, test_free);
     printf("rm2k C API tests\n\n");
 
     printf("standalone:\n");
@@ -209,6 +283,10 @@ int main(int argc, char** argv) {
     test_truncated_input_is_an_error_not_a_crash();
     test_diagnostic_names();
     test_chunk_ids_are_exported();
+    test_engine_follows_the_ldb_id();
+    test_split_header_and_chunks();
+    test_overrun_chunk_is_cut_short_and_reported();
+    test_list_walker_yields_each_element();
 
     if (argc > 1) {
         char path[1024];

@@ -58,6 +58,11 @@ impl<'a> TreeMap<'a> {
         }
     }
 
+    /// Writes the tree without the file magic. [`file::save_tree_map`](crate::file::save_tree_map) adds that.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the sink's error.
     pub fn write_inline<S: Sink>(&self, sink: &mut S, engine: Engine) -> Result<(), S::Error> {
         crate::field::LcfField::write(&self.maps, sink, engine)?;
 

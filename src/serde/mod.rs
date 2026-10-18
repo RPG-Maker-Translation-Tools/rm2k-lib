@@ -1,9 +1,8 @@
 //! `serde` support for the data model.
 //!
-//! Enabled by the `serde` feature. Every schema struct, enumeration and flag bundle derives
-//! [`Serialize`] and [`Deserialize`]; the hand-written types get their implementations here. Pick
-//! any `serde`-compatible format crate to convert a loaded file to and from JSON, YAML, TOML, or
-//! anything else with a `serde` backend.
+//! Enabled by the `serde` feature. Schema structs, enums and flag bundles derive
+//! [`Serialize`] and [`Deserialize`]; hand-written types get their impls here. Any `serde` format
+//! crate converts a loaded file to and from JSON, YAML, TOML, and the like.
 //!
 //! [`DbStr`] is a run of bytes in an unknown encoding, not a string, so there is no honest
 //! lossless mapping onto a JSON string. Two representations, chosen by the format:

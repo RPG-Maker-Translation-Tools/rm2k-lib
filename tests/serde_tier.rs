@@ -9,7 +9,7 @@
 
 use rm2k::{
     field::{LcfStruct, List, Packed, UnknownChunks},
-    raw::{EventCommand, EventCommandList},
+    raw::{EventCommand, EventCommandList, MoveCommand, StrList},
     rpg::{Actor, Database, Learning, Map, TreeMap},
     {DbStr, Engine, SaveOpt, file},
 };
@@ -163,4 +163,66 @@ fn an_unknown_enum_value_survives() {
     let json = serde_json::to_string(&animation).unwrap();
     let back: rm2k::rpg::Animation<'static> = serde_json::from_str(&json).unwrap();
     assert_eq!(back.scope.get(), 4242);
+}
+
+#[test]
+fn a_binary_format_round_trips_to_the_same_value() {
+    // CBOR is not human-readable, so serde takes the byte-string branch rather than the escaped one.
+    let db = populated();
+    let mut buf = Vec::new();
+    ciborium::into_writer(&db, &mut buf).unwrap();
+    let back: Database<'static> = ciborium::from_reader(buf.as_slice()).unwrap();
+    assert_eq!(back, db);
+}
+
+#[test]
+fn text_accepts_a_byte_array_as_well_as_a_byte_string() {
+    // CBOR byte string of four bytes, then the same four as a CBOR array of integers.
+    let as_bytes: DbStr<'static> = ciborium::from_reader([0x44, 1, 2, 3, 4].as_slice()).unwrap();
+    let as_array: DbStr<'static> = ciborium::from_reader([0x84, 1, 2, 3, 4].as_slice()).unwrap();
+    assert_eq!(as_bytes.as_bytes(), &[1, 2, 3, 4]);
+    assert_eq!(as_array.as_bytes(), &[1, 2, 3, 4]);
+}
+
+#[test]
+fn text_rejects_a_number_and_says_what_it_wanted() {
+    let err = serde_json::from_str::<DbStr<'static>>("5").unwrap_err();
+    assert!(err.to_string().contains("escaped string or a byte array"), "{err}");
+}
+
+#[test]
+fn a_string_list_survives_json() {
+    let list = StrList(vec![
+        DbStr::from_bytes(SHIFT_JIS),
+        DbStr::default(),
+        DbStr::from_bytes(b"x"),
+    ]);
+    let json = serde_json::to_string(&list).unwrap();
+    let back: StrList<'static> = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, list);
+}
+
+#[test]
+fn a_move_command_survives_json() {
+    let command = MoveCommand {
+        code: 41,
+        string: DbStr::from_bytes(SHIFT_JIS),
+        parameter_a: 1,
+        parameter_b: 2,
+        parameter_c: 3,
+    };
+    let json = serde_json::to_string(&command).unwrap();
+    let back: MoveCommand<'static> = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, command);
+}
+
+#[test]
+fn text_takes_bytes_lent_by_the_deserializer() {
+    use serde::{
+        Deserialize,
+        de::value::{BorrowedBytesDeserializer, Error},
+    };
+    let deserializer = BorrowedBytesDeserializer::<Error>::new(&[1, 2, 3]);
+    let text = DbStr::deserialize(deserializer).unwrap();
+    assert_eq!(text.as_bytes(), &[1, 2, 3]);
 }

@@ -1,9 +1,8 @@
 //! Fatal errors.
 //!
-//! The distinction that matters here: a [`ReadError`] means parsing *stopped* - the input was too
-//! short to hold even a header - while a [`Diagnostic`](crate::diag::Diagnostic) means parsing
-//! recovered from a problem and kept going. Both error types are `Copy` and carry only offsets
-//! and `&'static str`, so they exist happily in the core tier with no allocator.
+//! A [`ReadError`] means parsing *stopped* (input too short for even a header); a
+//! [`Diagnostic`](crate::diag::Diagnostic) means parsing recovered and went on. Both are `Copy`
+//! and hold only offsets and `&'static str`, so they work in the core tier with no allocator.
 
 use thiserror::Error;
 
@@ -51,9 +50,8 @@ pub enum ReadError {
 
 /// Something went wrong while serialising.
 ///
-/// There is only one variant, and it is unreachable when writing into a `Vec<u8>` - see
-/// [`Sink`](crate::sink::Sink), whose `Vec` impl uses `Infallible` so the alloc write path is
-/// statically infallible.
+/// One variant, unreachable when writing into a `Vec<u8>` (its [`Sink`](crate::sink::Sink) impl
+/// uses `Infallible`).
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 pub enum WriteError {
     /// A fixed-size [`SliceSink`](crate::sink::SliceSink) ran out of room.

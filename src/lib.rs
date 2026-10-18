@@ -8,7 +8,8 @@
     clippy::cast_sign_loss,
     clippy::single_match_else
 )]
-#![doc = include_str!("../README.md")]
+// The README's example needs `file`, which needs `alloc`, so the page is only attached when it can compile.
+#![cfg_attr(feature = "alloc", doc = include_str!("../README.md"))]
 
 extern crate self as rm2k;
 

@@ -1,22 +1,18 @@
 //! The LCF wire codec: compressed integers, fixed-width primitives, file magics.
 //!
-//! Pure functions over byte slices, with no cursor state - [`Cursor`](crate::cursor::Cursor)
-//! layers position tracking and diagnostics on top. Everything here is allocation-free and free
-//! of `unsafe`.
+//! Pure functions over byte slices, no cursor state; [`Cursor`](crate::cursor::Cursor) adds
+//! position tracking and diagnostics. Allocation-free, no `unsafe`.
 //!
 //! # Compressed integers
 //!
-//! LCF's variable-length integer is **big-endian** base-128 with an MSB continuation bit - the
-//! opposite byte order from protobuf's LEB128, so an off-the-shelf varint crate will decode it
-//! wrong.
+//! LCF varints are **big-endian** base-128 with an MSB continuation bit, unlike protobuf's LEB128;
+//! an off-the-shelf varint crate decodes them wrong.
 //!
-//! A well-formed encoding is at most 5 bytes. A longer one is malformed, but its bytes still have
-//! to be consumed to keep the cursor in sync with the rest of the file: [`decode_varint`] keeps
-//! reading until it sees a byte with the high bit clear, decodes to `0`, and reports the overrun
-//! via `overflow` so the caller can record a
-//! [`DiagKind::BadVarint`](crate::diag::DiagKind::BadVarint) rather than treating it as `0` and
-//! saying nothing. Accumulation happens in a 32-bit register (`value = (value << 7) | (byte &
-//! 0x7F)`), so a maximal 5-byte encoding wraps rather than widening.
+//! A well-formed encoding is at most 5 bytes. Longer ones are malformed, but their bytes must still
+//! be consumed to keep the cursor in sync: [`decode_varint`] reads until a byte with the high bit
+//! clear, decodes to `0`, and sets `overflow` so the caller can record a
+//! [`DiagKind::BadVarint`](crate::diag::DiagKind::BadVarint). Accumulation is in a 32-bit register
+//! (`value = (value << 7) | (byte & 0x7F)`), so a maximal 5-byte encoding wraps.
 
 use crate::sink::Sink;
 
@@ -80,10 +76,9 @@ pub struct Varint64 {
 
 /// Decode a 64-bit compressed integer from the front of `buf`.
 ///
-/// Same shape as [`decode_varint`] with a 10-byte cap (`LcfReader::ReadUInt64`,
+/// Same as [`decode_varint`] with a 10-byte cap (`LcfReader::ReadUInt64`,
 /// `src/reader_lcf.cpp:106`). Used only by the sparse string-vector encoding, where a value above
-/// `u32::MAX` is a run-length gap marker rather than a string length
-/// (`src/dbstring_struct.cpp:93`).
+/// `u32::MAX` is a run-length gap marker, not a length (`src/dbstring_struct.cpp:93`).
 #[must_use]
 pub fn decode_varint64(buf: &[u8]) -> Option<Varint64> {
     let mut value: u64 = 0;
@@ -209,10 +204,9 @@ pub fn read_u32_le(buf: &[u8]) -> Option<u32> {
 
 /// Read a little-endian `i32` from the front of `buf`.
 ///
-/// This is the *raw* form used inside packed arrays. A bare `Int32` **field** is a compressed
-/// integer instead - see [`decode_varint`]. liblcf's
-/// `LcfWriter::Write<int32_t>(const std::vector<int32_t>&)` carries a comment claiming it writes a
-/// compressed integer; it does not (`src/writer_lcf.cpp:101`).
+/// Raw form used inside packed arrays. A bare `Int32` **field** is a compressed integer instead
+/// ([`decode_varint`]). liblcf's comment on `LcfWriter::Write<int32_t>(&Vec<int32_t>)` says
+/// otherwise, and is wrong (`src/writer_lcf.cpp:101`).
 #[must_use]
 #[inline]
 pub fn read_i32_le(buf: &[u8]) -> Option<i32> {

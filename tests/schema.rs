@@ -8,6 +8,8 @@
 
 use rm2k::{
     diag::{DiagKind, Diagnostic},
+    field::Strings,
+    rpg::enums::AnimationTimingFlashScope,
     {BitArray, ChunkIter, Ctx, DbStr, Engine, LcfField, LcfStruct, List, NullSink, Packed, UnknownChunks},
     {lcf_enum, lcf_flags, lcf_struct},
 };
@@ -514,4 +516,74 @@ fn unknown_chunks_nested_in_a_list_element_round_trip() {
     let mut out = Vec::new();
     actor.write_body(&mut out, Engine::R2K).unwrap();
     assert_eq!(out, buf);
+}
+
+#[test]
+fn an_enum_converts_from_integers_names_its_values_and_defaults_to_zero() {
+    let scope = AnimationTimingFlashScope::from(2);
+    assert_eq!(scope, AnimationTimingFlashScope::SCREEN);
+    assert_eq!(scope.get(), 2);
+    assert_eq!(scope.name(), Some("SCREEN"));
+    assert_eq!(AnimationTimingFlashScope::from(9).name(), None);
+    assert_eq!(
+        <AnimationTimingFlashScope as LcfField>::field_default(Engine::R2K),
+        AnimationTimingFlashScope::NOTHING
+    );
+}
+
+#[test]
+fn visit_strings_reaches_every_string_field() {
+    let mut actor = rm2k::rpg::Actor::defaults(Engine::R2K);
+    actor.name = DbStr::from_bytes(b"Hero");
+    let mut names = Vec::new();
+    actor.visit_strings(&mut |name, _| names.push(name));
+    assert_eq!(names, ["name", "title", "character_name", "face_name", "skill_name"]);
+}
+
+#[test]
+fn a_struct_exposes_its_unknown_chunks_through_the_trait() {
+    assert!(Actor::defaults(Engine::R2K).unknown_chunks().is_empty());
+}
+
+#[test]
+fn flags_flush_each_full_byte_and_then_the_partial_tail() {
+    let flags = CondFlags {
+        switch_a: true,
+        switch_b: false,
+        variable: false,
+        turn: false,
+        fatigue: false,
+        enemy_hp: false,
+        actor_hp: false,
+        turn_enemy: false,
+        turn_actor: false,
+        command_actor: true,
+    };
+    // Ten bits under 2003: the eighth fills a byte, and the last two spill into a second.
+    let mut out = Vec::new();
+    flags.write(&mut out, Engine::R2K3).unwrap();
+    assert_eq!(out, [0x01, 0x02]);
+
+    // Under 2000 the 2003-only tail is skipped, so the same flags fit one byte.
+    let mut r2k = Vec::new();
+    flags.write(&mut r2k, Engine::R2K).unwrap();
+    assert_eq!(r2k, [0x01]);
+}
+
+#[test]
+fn a_flag_bundle_wider_than_a_byte_writes_and_reads_back_bit_for_bit() {
+    // Twenty flags pack into three bytes. Bit 8 starts the second byte and bit 19 lands in the third,
+    // so the writer's byte flush and its final partial byte both run.
+    let mut flags = rm2k::rpg::EasyRpgStateRuntimeFlags::DEFAULT;
+    flags.patch_maniac_on = true;
+    flags.use_r2k_battle_system_off = true;
+
+    let mut bytes = Vec::new();
+    LcfField::write(&flags, &mut bytes, Engine::R2K).unwrap();
+    assert_eq!(bytes, [0x00, 0x01, 0x08]);
+
+    let mut sink = NullSink;
+    let mut ctx = Ctx::new(Engine::R2K, &mut sink);
+    let read = <rm2k::rpg::EasyRpgStateRuntimeFlags as LcfField>::read(&bytes, &mut ctx, "Test", 0);
+    assert_eq!(read, flags);
 }

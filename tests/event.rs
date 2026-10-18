@@ -110,3 +110,72 @@ fn command_length_matches_what_was_decoded() {
     let len = event_command_len(cmd.code, cmd.indent, cmd.string.len(), &[1, 2]);
     assert_eq!(len as usize, ONE_COMMAND.len() - 4);
 }
+
+#[test]
+fn a_change_graphic_move_command_reads_its_name_and_index() {
+    let buf = [34, 0x01, b'g', 0x05];
+    let mut sink = NullSink;
+    let mut c = ctx(&mut sink);
+    let mut it = MoveCommandIter::new(&buf, 0);
+    let cmd = it.next(&mut c).unwrap();
+    assert_eq!(cmd.code, move_code::CHANGE_GRAPHIC);
+    assert_eq!(cmd.string, b"g");
+    assert_eq!(cmd.parameter_a, 5);
+}
+
+#[test]
+fn a_truncated_move_command_keeps_what_it_read_and_reports() {
+    // Missing its name entirely, then a name with no index after it.
+    for buf in [&[34u8][..], &[34, 0x01, b'g'][..]] {
+        let mut slots = [Diagnostic::EMPTY; 2];
+        let mut sink = SliceSink::new(&mut slots);
+        {
+            let mut c = Ctx::new(Engine::R2K, &mut sink);
+            let mut it = MoveCommandIter::new(buf, 0);
+            assert!(it.next(&mut c).is_some());
+        }
+        assert_eq!(sink.as_slice()[0].kind, DiagKind::ShortChunk);
+    }
+}
+
+#[test]
+fn a_command_cut_off_before_its_parameters_recovers_and_reports() {
+    // Stops after the code, after the indent, and after the string length.
+    for buf in [&[1u8][..], &[1, 0][..], &[1, 0, 0][..]] {
+        let mut slots = [Diagnostic::EMPTY; 2];
+        let mut sink = SliceSink::new(&mut slots);
+        {
+            let mut c = Ctx::new(Engine::R2K, &mut sink);
+            let mut it = EventCommandIter::new(buf, 0);
+            assert!(it.next(&mut c).is_none());
+        }
+        assert_eq!(sink.as_slice()[0].kind, DiagKind::EventListCorrupt);
+    }
+}
+
+#[test]
+fn a_command_exposes_its_raw_parameter_bytes_and_the_list_its_tail() {
+    let buf = [0x01, 0x00, 0x00, 0x02, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0xAA];
+    let mut sink = NullSink;
+    let mut c = ctx(&mut sink);
+    let mut it = EventCommandIter::new(&buf, 0);
+    let cmd = it.next(&mut c).unwrap();
+    assert_eq!(cmd.raw_params(), &[0x01, 0x02]);
+    assert!(it.next(&mut c).is_none());
+    assert_eq!(it.tail(), &[0xAA]);
+}
+
+#[test]
+fn a_command_cut_mid_field_resynchronises_on_the_terminator() {
+    // A code that never terminates, then a string whose declared length overruns the payload.
+    for buf in [&[0x80u8][..], &[0x01, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00][..]] {
+        let mut slots = [Diagnostic::EMPTY; 2];
+        let mut sink = SliceSink::new(&mut slots);
+        {
+            let mut c = Ctx::new(Engine::R2K, &mut sink);
+            let mut it = EventCommandIter::new(buf, 0);
+            assert!(it.next(&mut c).is_none());
+        }
+        assert_eq!(sink.as_slice()[0].kind, DiagKind::EventListCorrupt);
+    }
+}

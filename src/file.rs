@@ -82,7 +82,7 @@ macro_rules! format_io {
         ///
         /// # Errors
         ///
-        /// As [`$load`].
+        /// As the loader above.
         pub fn $load_with<'a>(
             buf: &'a [u8],
             diag: &mut dyn DiagSink,
@@ -196,7 +196,7 @@ pub fn save_tree_map<S: Sink>(
 /// Serialize a value into a fresh `Vec`.
 ///
 /// A convenience over the `save_*` functions for the common case; they take a
-/// [`Sink`](crate::sink::Sink) so they also work against a fixed buffer with no allocator.
+/// [`Sink`] so they also work against a fixed buffer with no allocator.
 #[must_use]
 pub fn to_vec<T, F>(save: F) -> Vec<u8>
 where

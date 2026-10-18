@@ -1,16 +1,15 @@
 //! Per-field wire codecs.
 //!
-//! Every LCF field kind - a compressed integer, a raw byte string, a packed primitive array, a
-//! nested struct, an indexed struct list - implements [`LcfField`]. The schema macro then needs
-//! to know nothing about types: it emits `match chunk.id { 0x01 => obj.name = LcfField::read(...) }`
-//! and the right codec is selected at compile time, with no runtime dispatch table.
+//! Every LCF field kind (compressed integer, raw byte string, packed primitive array, nested
+//! struct, indexed struct list) implements [`LcfField`]. The schema macro needs no type knowledge:
+//! it emits `match chunk.id { 0x01 => obj.name = LcfField::read(...) }`, and the codec is chosen
+//! at compile time with no runtime dispatch table.
 //!
-//! **Reading is infallible** - [`LcfField::read`] returns a value, never a `Result`. A field whose payload is malformed keeps
-//! its default and pushes a [`Diagnostic`](crate::diag::Diagnostic); it cannot abort the parse.
-//! This keeps the generated readers branch-free of error propagation, and real files depend on
-//! this leniency. A caller that wants to reject malformed input instead passes a
-//! [`StrictSink`](crate::diag::StrictSink); the *loader* is what stops, at the next chunk
-//! boundary, not the field read.
+//! **Reading is infallible**: [`LcfField::read`] returns a value, never a `Result`. A malformed
+//! field keeps its default and pushes a [`Diagnostic`](crate::diag::Diagnostic); it cannot abort
+//! the parse. Generated readers stay free of error propagation, and real files depend on this
+//! leniency. A caller wanting rejection passes a [`StrictSink`](crate::diag::StrictSink); the
+//! *loader* stops at the next chunk boundary, not the field read.
 
 use crate::{
     cursor::{ChunkIter, Ctx, Cursor},
@@ -23,12 +22,11 @@ use alloc::{borrow::Cow, vec::Vec};
 
 /// A borrowed or owned run of bytes from a file.
 ///
-/// **Not a string.** LCF records no encoding anywhere in the file, so this crate does not pretend
-/// to know one; see the crate-level docs. The bytes are whatever the authoring machine's codepage
-/// produced - commonly Shift-JIS or CP1252, but nothing in the format says which.
+/// **Not a string.** LCF records no encoding, so this crate does not pretend to know one (see the
+/// crate docs). The bytes are whatever the authoring machine's codepage produced: commonly
+/// Shift-JIS or CP1252, but the format does not say which.
 ///
-/// Borrows from the input buffer until [`into_owned`](DbStr::into_owned) is called, so loading a
-/// database copies no text at all.
+/// Borrows from the input until [`into_owned`](DbStr::into_owned), so loading copies no text.
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct DbStr<'a>(Cow<'a, [u8]>);
 
@@ -61,8 +59,7 @@ impl<'a> DbStr<'a> {
         self.0.len()
     }
 
-    /// Whether the field is empty. Empty is also the default for every string field, which is
-    /// what makes the writer elide it.
+    /// Whether the field is empty. Empty is the default for every string field, so the writer elides it.
     #[must_use]
     #[inline]
     pub fn is_empty(&self) -> bool {
@@ -77,9 +74,8 @@ impl<'a> DbStr<'a> {
 
     /// Interpret as UTF-8, if it happens to be valid.
     ///
-    /// Returns `None` for anything else - which includes most non-English games. Provided for
-    /// the common case of a filename or an identifier that is incidentally ASCII; it is not an
-    /// encoding layer and is not a substitute for one.
+    /// Returns `None` otherwise, including for most non-English games. Meant for incidentally-ASCII
+    /// values like a filename or identifier; it is not an encoding layer.
     #[must_use]
     #[inline]
     pub fn as_utf8(&self) -> Option<&str> {
@@ -99,9 +95,7 @@ impl<'a> From<&'a [u8]> for DbStr<'a> {
 /// Translation tools need to ask "what text does this actor hold, and what is each piece called",
 /// and doing it by hand means naming all 127 fields of `Terms`.
 ///
-/// One struct, its own string fields, no recursion and no context chain.
-/// Nesting is something the caller already has typed access to, so the visitor
-/// does not need to reinvent it.
+/// One struct's own string fields, no recursion: nesting is already reachable through typed access.
 pub trait Strings<'a> {
     /// Call `f` once per string field, with the field's name and value.
     fn visit_strings(&self, f: &mut dyn FnMut(&'static str, &DbStr<'a>));
@@ -109,7 +103,7 @@ pub trait Strings<'a> {
 
 /// A run of booleans stored one byte per element.
 ///
-/// The wire form is one byte per boolean. Only the separate flags nundles are truly bit-packed.
+/// The wire form is one byte per boolean. Only the separate flag bundles are bit-packed.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BitArray<'a>(Cow<'a, [u8]>);
 
@@ -178,19 +172,16 @@ pub trait LcfField<'a>: Sized {
     /// The value this field holds when its chunk is absent and the schema gives no explicit
     /// default.
     ///
-    /// Engine-dependent because a nested struct's own defaults are, and because the writer
-    /// elides any field equal to its default - so getting this wrong changes the bytes emitted,
-    /// not just the value observed.
+    /// Engine-dependent (nested defaults are, and the writer elides fields equal to their default),
+    /// so getting it wrong changes the emitted bytes, not just the observed value.
     fn field_default(engine: Engine) -> Self;
 
     /// Encoded length in bytes, which the two-pass writer emits as the chunk's length prefix.
     fn lcf_size(&self, engine: Engine) -> u32;
 
-    /// Whether `self` would be written differently from `other`, which is how the writer decides to
-    /// elide a field equal to its default.
-    ///
-    /// Plain `!=` except for floats, which compare by bits: `-0.0 == 0.0`, so `!=` would drop a
-    /// stored `-0.0` and break the byte-for-byte round trip.
+    /// Whether `self` differs from `other` in its written form; the writer elides a field equal to
+    /// its default. Plain `!=`, except floats compare by bits: `-0.0 == 0.0`, so `!=` would drop a
+    /// stored `-0.0` and break the round trip.
     #[inline]
     fn lcf_differs(&self, other: &Self) -> bool
     where
@@ -201,9 +192,8 @@ pub trait LcfField<'a>: Sized {
 
     /// Number of elements, for array-like fields.
     ///
-    /// Consulted only by companion `count`/`size` chunks and by their elision test.
-    /// Scalar fields never have a companion chunk, so the default of
-    /// `0` is never observed for them.
+    /// Used only by companion `count`/`size` chunks and their elision test. Scalar fields have no
+    /// companion, so `0` is never observed for them.
     #[inline]
     fn element_count(&self) -> u32 {
         0
@@ -429,8 +419,8 @@ impl<'a> LcfField<'a> for BitArray<'a> {
 
 /// A primitive that appears inside a raw packed array.
 ///
-/// Packed arrays carry no element count: the count is the chunk length divided by the element
-/// size. A payload that is not a whole multiple is truncated and reported as [`DiagKind::RaggedArray`].
+/// Packed arrays have no element count: count is chunk length divided by element size. A payload
+/// that is not a whole multiple is truncated and reported as [`DiagKind::RaggedArray`].
 pub trait PackedPrim: Sized + Copy {
     /// Bytes per element on the wire.
     const SIZE: usize;
@@ -494,10 +484,9 @@ impl PackedPrim for u32 {
 
 /// A raw packed array of a fixed-width primitive.
 ///
-/// A newtype rather than a bare `Vec<T>` so it cannot collide with the indexed struct list
-/// codec: `Vec<i16>` and `Vec<Learning>` are both "a `Vec`" to the type system but entirely
-/// different wire formats, and making the distinction a type keeps the schema honest about which
-/// one a field is.
+/// A newtype, not a bare `Vec<T>`, so it cannot collide with the indexed struct list codec:
+/// `Vec<i16>` and `Vec<Learning>` are both `Vec`s to the type system but different wire formats.
+/// The type keeps the schema honest about which one a field is.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Packed<T>(pub Vec<T>);
 
@@ -564,10 +553,9 @@ pub trait LcfStruct<'a>: Sized {
 
     /// Apply one chunk.
     ///
-    /// Returns the id of the field that consumed it - which is the chunk's own id, except for a
-    /// companion size/count chunk, which reports the id of the sibling it belongs to. `None`
-    /// means no field claimed it; [`read_stream`](LcfStruct::read_stream) then keeps it verbatim
-    /// as an [`UnknownChunk`] anchored to whatever was recognised last.
+    /// Returns the id of the field that consumed it: the chunk's own id, or for a companion
+    /// size/count chunk, its sibling's. `None` means unclaimed; [`read_stream`](LcfStruct::read_stream)
+    /// keeps it verbatim as an [`UnknownChunk`] anchored to the last recognised field.
     fn apply_chunk(&mut self, id: u32, data: &'a [u8], ctx: &mut Ctx<'_>) -> Option<u32>;
 
     /// The chunks no field claimed, kept so they can be written back.
@@ -646,8 +634,8 @@ impl<'a, T: LcfStruct<'a>> LcfField<'a> for T {
     }
 }
 
-// Tests for this module live in `tests/field.rs`: `LcfField`, `DbStr`, `BitArray` and `Packed`
-// are all `pub`, so a black-box test has nothing more to reach.
+// Tests live in `tests/field.rs`: `LcfField`, `DbStr`, `BitArray` and `Packed` are all `pub`, so
+// black-box tests reach everything here.
 
 /// A chunked struct that carries a leading id.
 pub trait LcfIndexed<'a>: LcfStruct<'a> {
@@ -681,11 +669,9 @@ impl<T> core::ops::DerefMut for List<T> {
 }
 
 impl<'a, T: LcfIndexed<'a>> List<T> {
-    /// Read a list from a shared cursor, leaving it positioned after the last element.
-    ///
-    /// Needed because `TreeMap` embeds a `MapInfo` list directly in the file stream rather than
-    /// inside a length-prefixed chunk, so the caller has to keep
-    /// reading from the same position afterwards.
+    /// Reads a list from a shared cursor, leaving it after the last element. `TreeMap` embeds a
+    /// `MapInfo` list straight in the file stream, not in a length-prefixed chunk, so the caller
+    /// must keep reading from the same position.
     pub fn read_inline(cur: &mut Cursor<'a>, ctx: &mut Ctx<'_>, owner: &'static str, id: u32) -> Self {
         let count = cur.varint_lenient(ctx, owner, id);
 
@@ -758,11 +744,10 @@ impl<'a, T: LcfIndexed<'a>> LcfField<'a> for List<T> {
 
 /// A list of structs that carry **no** id: `varint(count)` then bare chunk streams.
 ///
-/// liblcf decides between this and [`List`] with a SFINAE probe for a member named `ID`
-/// (`IDChecker<T>`, `src/reader_struct.h:539`), dispatching to `IDReaderT<S, false>` whose
-/// `ReadID`/`WriteID` are empty. Exactly one type in the schema needs it - `SaveEasyRpgText`, an
-/// EasyRPG extension - but getting it wrong would silently shift every element by one compressed
-/// integer, so it is a distinct type rather than a runtime flag.
+/// liblcf picks this over [`List`] with a SFINAE probe for an `ID` member (`IDChecker<T>`,
+/// `src/reader_struct.h:539`). Exactly one schema type needs it, `SaveEasyRpgText` (an EasyRPG
+/// extension). Getting it wrong would shift every element by one compressed integer, so it is a
+/// distinct type, not a runtime flag.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnindexedList<T>(pub Vec<T>);
 
@@ -840,19 +825,18 @@ impl<'a, T: LcfStruct<'a>> LcfField<'a> for UnindexedList<T> {
 
 /// A chunk whose id no field of the owning struct claims.
 ///
-/// RPG Maker's forward-compatibility story is "write chunks the reader may not know", so files in
-/// the wild carry ids this schema has no field for - an id added by a later `RPG_RT` build, an
-/// EasyRPG extension, or a third-party editor. Dropping them makes a load/save cycle lossy for
-/// exactly the files whose contents we understand the least, so they are kept verbatim and
-/// written back.
+/// RPG Maker's forward-compatibility story is "write chunks the reader may not know". Files in the
+/// wild carry ids this schema lacks (a later `RPG_RT` build, an EasyRPG extension, a third-party
+/// editor). Dropping them would make load/save lossy for the files we understand least, so they
+/// are kept verbatim and written back.
 ///
-/// The payload is raw bytes because that is the only honest thing to do: with no schema entry
-/// there is nothing to say whether it is an integer, a string, or a nested chunk stream - LCF
-/// chunks carry no type tag (see the [schema docs](crate::schema)).
+/// The payload is raw bytes: with no schema entry there is nothing to say whether it is an
+/// integer, a string, or a nested chunk stream, since LCF chunks carry no type tag (see the
+/// [schema docs](crate::schema)).
 ///
-/// **It owns its bytes**, unlike every other field kind here. Twenty-odd schema structs borrow
-/// nothing and so carry no lifetime parameter; giving them one just to hold unknown chunks would
-/// be a far larger break than a copy on a path that is empty for every well-formed file.
+/// **Owns its bytes**, unlike the other field kinds. Twenty-odd schema structs borrow nothing and
+/// carry no lifetime parameter; adding one just for unknown chunks would be a far larger break than
+/// a copy on a path that is empty for well-formed files.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct UnknownChunk {
@@ -862,13 +846,12 @@ pub struct UnknownChunk {
     pub id: u32,
     /// Id of the last *recognised* field seen before this chunk, or `0` if it came before any.
     ///
-    /// This is what puts the chunk back where it was found. Anchoring to a neighbouring field
-    /// rather than sorting by id matters because the schema's declaration order is liblcf's
-    /// emission order, and that is not ascending in seven structs (`Enemy`, `SaveSystem`,
-    /// `SavePicture`, ...) - sorting would move unknown chunks across known ones.
+    /// Puts the chunk back where it was found. Anchoring beats sorting by id: the schema's
+    /// declaration order is liblcf's emission order, which is not ascending in seven structs
+    /// (`Enemy`, `SaveSystem`, `SavePicture`, ...), so sorting would move unknown chunks across
+    /// known ones.
     ///
-    /// `0` is free to mean "before everything" because a zero id terminates a chunk stream and so
-    /// can never be a field's own id.
+    /// `0` means "before everything": a zero id terminates a chunk stream, so it is never a field's id.
     pub anchor: u32,
 }
 
@@ -908,9 +891,8 @@ impl UnknownChunks {
 
     /// Write back every chunk anchored to `anchor`, header and payload, in read order.
     ///
-    /// The generated writer calls this once per field, so the empty-case early-out is what keeps
-    /// it to one well-predicted branch per field for files that have no unknown chunks. The
-    /// length prefix is recomputed from the payload rather than stored, so a caller that edits
+    /// Called once per field, so the empty-case early-out keeps files without unknown chunks to one
+    /// predictable branch per field. The length prefix is recomputed from the payload, so an edited
     /// `data` still emits a consistent chunk.
     ///
     /// # Errors

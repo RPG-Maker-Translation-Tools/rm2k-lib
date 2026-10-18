@@ -25,9 +25,9 @@ exclude = [
 members = ["capi", "wasm"]
 
 [workspace.package]
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
-rust-version = "1.77.0"
+rust-version = "1.81.0"
 authors = ["savannstm <savannstm@gmail.com>"]
 description = "Reads and writes the RPG Maker 2000/2003 LCF binary formats (LDB, LMU, LMT, LSD)."
 license = "WTFPL"
@@ -54,11 +54,15 @@ serde = { version = "1.0.229", optional = true, default-features = false, featur
 thiserror = { version = "2.0.21", default-features = false }
 
 [dev-dependencies]
-criterion = "0.8.2"
+ciborium = "0.2.2"
 serde_json = { version = "1.0.154", default-features = false, features = [
     "alloc",
 ] }
 yaml_serde = "0.10.7"
+
+# Benchmarks only run natively: criterion's rayon does not build for wasm.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion = "0.8.2"
 
 [[bench]]
 name = "database_load"
@@ -76,6 +80,10 @@ required-features = ["alloc"]
 [[test]]
 name = "serde_tier"
 required-features = ["serde"]
+
+[[test]]
+name = "malformed"
+required-features = ["alloc"]
 
 [[test]]
 name = "wire"
@@ -128,3 +136,10 @@ required-features = ["std"]
 [[example]]
 name = "to_yaml"
 required-features = ["std", "serde"]
+
+# The `no_std` C build needs abort-on-panic, and the panic handler in capi/src/lib.rs aborts anyway.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

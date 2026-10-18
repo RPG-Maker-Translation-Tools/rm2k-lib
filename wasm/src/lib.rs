@@ -1,8 +1,7 @@
-//! A loaded value is serialized straight to a `JsValue` inside the same call, so the borrow never
-//! needs to outlive it; going the other way, `serde_wasm_bindgen::from_value` never hands out
-//! borrowed data (a `JsValue` has no linear-memory-backed byte slice to borrow from), so every
-//! `DbStr` deserializes into owned bytes regardless of lifetime. That means, unlike the C API,
-//! this crate needs no `IntoOwned`/handle machinery at all.
+//! A loaded value serializes straight to a `JsValue` within the same call, so the borrow never
+//! outlives it. `serde_wasm_bindgen::from_value` never hands out borrowed data (a `JsValue` has no
+//! linear-memory slice to borrow), so every `DbStr` becomes owned bytes. Unlike the C API, this
+//! crate needs no `IntoOwned`/handle machinery.
 #![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 
 use rm2k::Diagnostic;
@@ -66,6 +65,27 @@ impl From<Engine> for rm2k::Engine {
     }
 }
 
+impl From<rm2k::Engine> for Engine {
+    fn from(engine: rm2k::Engine) -> Self {
+        match engine {
+            rm2k::Engine::R2K => Self::R2K,
+            rm2k::Engine::R2K3 => Self::R2K3,
+        }
+    }
+}
+
+/// Classifies a raw `system.ldb_id` value: `2003` is 2003, anything else is 2000.
+#[wasm_bindgen(js_name = engineFromLdbId)]
+#[must_use]
+pub fn engine_from_ldb_id(ldb_id: i32) -> Engine {
+    rm2k::Engine::from_ldb_id(ldb_id).into()
+}
+
+/// Loads an `RPG_RT.ldb` database from its bytes. Recoverable problems are returned in `diagnostics`.
+///
+/// # Errors
+///
+/// Fails when `bytes` is too short to hold the file's header.
 #[wasm_bindgen(js_name = loadDatabase)]
 pub fn load_database(bytes: &[u8]) -> Result<LoadResult, JsError> {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -78,6 +98,11 @@ pub fn load_database(bytes: &[u8]) -> Result<LoadResult, JsError> {
     })
 }
 
+/// Writes a database value, as `loadDatabase` returns it, back to bytes.
+///
+/// # Errors
+///
+/// Fails when `value` does not deserialize into a database.
 #[wasm_bindgen(js_name = saveDatabase)]
 pub fn save_database(value: JsValue, engine: Engine, preserve_header: bool, header: &[u8]) -> Result<Vec<u8>, JsError> {
     let value: rm2k::rpg::Database<'static> = serde_wasm_bindgen::from_value(value).map_err(to_js_error)?;
@@ -87,6 +112,11 @@ pub fn save_database(value: JsValue, engine: Engine, preserve_header: bool, head
     }))
 }
 
+/// Loads a `MapNNNN.lmu` map from its bytes. Recoverable problems are returned in `diagnostics`.
+///
+/// # Errors
+///
+/// Fails when `bytes` is too short to hold the file's header.
 #[wasm_bindgen(js_name = loadMap)]
 pub fn load_map(bytes: &[u8]) -> Result<LoadResult, JsError> {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -99,6 +129,11 @@ pub fn load_map(bytes: &[u8]) -> Result<LoadResult, JsError> {
     })
 }
 
+/// Writes a map value, as `loadMap` returns it, back to bytes.
+///
+/// # Errors
+///
+/// Fails when `value` does not deserialize into a map.
 #[wasm_bindgen(js_name = saveMap)]
 pub fn save_map(value: JsValue, engine: Engine, preserve_header: bool, header: &[u8]) -> Result<Vec<u8>, JsError> {
     let value: rm2k::rpg::Map<'static> = serde_wasm_bindgen::from_value(value).map_err(to_js_error)?;
@@ -108,6 +143,11 @@ pub fn save_map(value: JsValue, engine: Engine, preserve_header: bool, header: &
     }))
 }
 
+/// Loads an `LSD` save from its bytes. Recoverable problems are returned in `diagnostics`.
+///
+/// # Errors
+///
+/// Fails when `bytes` is too short to hold the file's header.
 #[wasm_bindgen(js_name = loadSave)]
 pub fn load_save(bytes: &[u8]) -> Result<LoadResult, JsError> {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -120,6 +160,11 @@ pub fn load_save(bytes: &[u8]) -> Result<LoadResult, JsError> {
     })
 }
 
+/// Writes a save value, as `loadSave` returns it, back to bytes.
+///
+/// # Errors
+///
+/// Fails when `value` does not deserialize into a save.
 #[wasm_bindgen(js_name = saveSave)]
 pub fn save_save(value: JsValue, engine: Engine, preserve_header: bool, header: &[u8]) -> Result<Vec<u8>, JsError> {
     let value: rm2k::rpg::Save<'static> = serde_wasm_bindgen::from_value(value).map_err(to_js_error)?;
@@ -129,6 +174,11 @@ pub fn save_save(value: JsValue, engine: Engine, preserve_header: bool, header: 
     }))
 }
 
+/// Loads an `LMT` map tree from its bytes. Recoverable problems are returned in `diagnostics`.
+///
+/// # Errors
+///
+/// Fails when `bytes` is too short to hold the file's header.
 #[wasm_bindgen(js_name = loadTreeMap)]
 pub fn load_tree_map(bytes: &[u8]) -> Result<LoadResult, JsError> {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -141,6 +191,11 @@ pub fn load_tree_map(bytes: &[u8]) -> Result<LoadResult, JsError> {
     })
 }
 
+/// Writes a map tree value, as `loadTreeMap` returns it, back to bytes.
+///
+/// # Errors
+///
+/// Fails when `value` does not deserialize into a map tree.
 #[wasm_bindgen(js_name = saveTreeMap)]
 pub fn save_tree_map(value: JsValue, engine: Engine, preserve_header: bool, header: &[u8]) -> Result<Vec<u8>, JsError> {
     let value: rm2k::rpg::TreeMap<'static> = serde_wasm_bindgen::from_value(value).map_err(to_js_error)?;
