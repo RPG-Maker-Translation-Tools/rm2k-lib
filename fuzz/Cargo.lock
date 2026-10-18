@@ -95,14 +95,14 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rm2k-capi"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "rm2k-lib",
 ]
 
 [[package]]
 name = "rm2k-lib"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "thiserror",
 ]
