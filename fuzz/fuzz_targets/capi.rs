@@ -1,13 +1,14 @@
 #![no_main]
-//! Drives the C ABI the way a C caller does. Each loader's output must save, and its save must
-//! load and save to the same bytes. Then every walker is run over the input's body, in every
-//! event scope, and every accessor is read, so the sanitizer checks the pointers and lengths they
-//! lend out.
+//! Drives the C ABI the way a C caller does. Every loader must accept its input and every save must
+//! return without crashing. For a clean load, the save must also load and save to the same bytes;
+//! recovered input is exempt, since its output need not be stable. Then every walker is run over
+//! the input's body, in every event scope, and every accessor is read, so the sanitizer checks the
+//! pointers and lengths they lend out.
 use libfuzzer_sys::fuzz_target;
 use rm2k_capi::{
     Rm2kBytes, Rm2kChunk, Rm2kChunkIter, Rm2kCommandList, Rm2kCommandLists, Rm2kDbList, Rm2kDiagnostic,
     Rm2kDiagnostics, Rm2kEngine, Rm2kError, Rm2kEventCommand, Rm2kEventCommands, Rm2kEventScope, Rm2kListItem,
-    Rm2kListWalker, Rm2kNamed, rm2k_buffer_free, rm2k_chunk_find, rm2k_chunk_iter_init, rm2k_chunk_iter_next,
+    Rm2kListWalker, Rm2kNamed, RM2K_DIAG_UNKNOWN_CHUNK, rm2k_buffer_free, rm2k_chunk_find, rm2k_chunk_iter_init, rm2k_chunk_iter_next,
     rm2k_command_lists_init, rm2k_command_lists_next, rm2k_database_free, rm2k_database_list_get,
     rm2k_database_list_len, rm2k_database_load, rm2k_database_save, rm2k_diagnostic_kind_name, rm2k_diagnostics_count,
     rm2k_diagnostics_free, rm2k_diagnostics_get, rm2k_diagnostics_new, rm2k_event_command_param,
@@ -17,15 +18,34 @@ use rm2k_capi::{
 };
 use std::{hint::black_box, ptr, slice};
 
-/// Copies out the buffer a `*_save` call returned, then frees it.
-fn saved(save: impl FnOnce(*mut usize) -> *mut u8) -> Vec<u8> {
+/// Copies out the buffer a `*_save` call returned, then frees it. `None` if the save failed.
+fn saved(save: impl FnOnce(*mut usize) -> *mut u8) -> Option<Vec<u8>> {
     let mut len = 0usize;
     let ptr = save(&mut len as *mut usize);
-    assert!(!ptr.is_null(), "a loaded value must save");
+    if ptr.is_null() {
+        return None;
+    }
     // SAFETY: `ptr` is a buffer of `len` initialized bytes from a save call, freed once below.
     let bytes = unsafe { slice::from_raw_parts(ptr, len) }.to_vec();
     unsafe { rm2k_buffer_free(ptr, len) };
-    bytes
+    Some(bytes)
+}
+
+/// Whether a load recovered from a problem other than an unknown chunk, so its input was corrupt.
+fn recovered(diagnostics: *const Rm2kDiagnostics) -> bool {
+    (0..unsafe { rm2k_diagnostics_count(diagnostics) }).any(|index| {
+        let mut diagnostic = Rm2kDiagnostic {
+            offset: 0,
+            chunk_id: 0,
+            kind: 0,
+            struct_name: Rm2kBytes {
+                data: ptr::null(),
+                len: 0,
+            },
+        };
+        let found = unsafe { rm2k_diagnostics_get(diagnostics, index, &mut diagnostic) };
+        found && diagnostic.kind != RM2K_DIAG_UNKNOWN_CHUNK
+    })
 }
 
 /// Reads the bytes an accessor lent out, so the sanitizer checks that the pointer and length are valid.
@@ -38,17 +58,25 @@ fn touch(bytes: Rm2kBytes) {
     black_box(lent.iter().fold(0u8, |sum, &byte| sum ^ byte));
 }
 
-/// Loads, saves, reloads and saves again, for both engines. The two saves must match.
+/// Loads and saves for both engines, checking for crashes. Reloading and the stability check run only
+/// for a clean load: a recovered load is corrupt input, and its output is not required to be stable.
 macro_rules! round_trip {
-    ($load:ident, $save:ident, $free:ident, $data:expr, $diag:expr) => {{
+    ($load:ident, $save:ident, $free:ident, $data:expr) => {{
         let mut err = Rm2kError::Ok;
-        let handle = unsafe { $load($data.as_ptr(), $data.len(), $diag, &mut err) };
+        let diag = rm2k_diagnostics_new();
+        let handle = unsafe { $load($data.as_ptr(), $data.len(), diag, &mut err) };
+        let corrupt = recovered(diag);
+        unsafe { rm2k_diagnostics_free(diag) };
         if !handle.is_null() {
             for engine in [Rm2kEngine::R2K, Rm2kEngine::R2K3] {
                 let first = saved(|len| unsafe { $save(handle, engine, true, len) });
+                if corrupt {
+                    continue;
+                }
+                let first = first.expect("a clean load must save");
                 let reloaded = unsafe { $load(first.as_ptr(), first.len(), ptr::null_mut(), &mut err) };
                 assert!(!reloaded.is_null(), "own output must load");
-                let second = saved(|len| unsafe { $save(reloaded, engine, true, len) });
+                let second = saved(|len| unsafe { $save(reloaded, engine, true, len) }).expect("a clean load must save");
                 assert!(first == second, "{engine:?}: save is not stable");
                 unsafe { $free(reloaded) };
             }
@@ -149,10 +177,10 @@ fn walk_body(body: &[u8], diag: *mut Rm2kDiagnostics) {
 fuzz_target!(|data: &[u8]| {
     let diag = rm2k_diagnostics_new();
 
-    round_trip!(rm2k_database_load, rm2k_database_save, rm2k_database_free, data, diag);
-    round_trip!(rm2k_map_load, rm2k_map_save, rm2k_map_free, data, diag);
-    round_trip!(rm2k_tree_map_load, rm2k_tree_map_save, rm2k_tree_map_free, data, diag);
-    round_trip!(rm2k_save_load, rm2k_save_save, rm2k_save_free, data, diag);
+    round_trip!(rm2k_database_load, rm2k_database_save, rm2k_database_free, data);
+    round_trip!(rm2k_map_load, rm2k_map_save, rm2k_map_free, data);
+    round_trip!(rm2k_tree_map_load, rm2k_tree_map_save, rm2k_tree_map_free, data);
+    round_trip!(rm2k_save_load, rm2k_save_save, rm2k_save_free, data);
 
     // The database's named lists, from a loaded database.
     let mut err = Rm2kError::Ok;
