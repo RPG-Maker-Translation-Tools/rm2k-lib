@@ -321,11 +321,13 @@ fn a_string_list_gap_past_the_address_space_is_rejected() {
 #[cfg_attr(miri, ignore)]
 #[test]
 fn a_string_list_stops_at_the_entry_budget_instead_of_growing_without_bound() {
-    // Each marker is a run of 40,000 empty entries and fits the input easily. Unbounded, 20,000 of them would
-    // be 800 million entries. The budget admits 26 runs (1,040,000 entries); a 27th would pass 1,048,576.
+    // Each marker is a run of 40,000 empty entries, followed by a one-byte entry so the run is not trailing
+    // (a trailing run of empties is dropped on load). Unbounded, 20,000 pairs would be 800 million entries.
+    // Each pair costs 40,001 entries, so the budget admits 26 pairs (1,040,026); a 27th run would pass 1,048,576.
     let mut buf = Vec::new();
     for _ in 0..20_000 {
         rm2k::wire::write_varint64(&mut buf, 0x8_0000_0000 - 40_000).unwrap();
+        buf.extend_from_slice(&[0x01, 0x61]);
     }
     let mut slots = [Diagnostic::EMPTY; 2];
     let mut sink = SliceSink::new(&mut slots);
@@ -333,7 +335,7 @@ fn a_string_list_stops_at_the_entry_budget_instead_of_growing_without_bound() {
         let mut ctx = Ctx::new(Engine::R2K, &mut sink);
         <StrList as LcfField>::read(&buf, &mut ctx, "T", 1)
     };
-    assert_eq!(list.len(), 26 * 40_000);
+    assert_eq!(list.len(), 26 * 40_001);
     assert_eq!(sink.as_slice()[0].kind, DiagKind::EntryBudgetExhausted);
 }
 
@@ -358,10 +360,12 @@ fn a_string_list_of_single_entries_stops_at_the_entry_budget() {
 #[test]
 fn the_entry_budget_is_shared_by_repeated_and_nested_string_lists() {
     // The first run fits. The second is read through a reborrow, as a nested struct's would be, and must still
-    // draw on the same budget: 1,200,000 entries would pass 1,048,576.
+    // draw on the same budget: 1,200,000 entries would pass 1,048,576. Each run ends in a one-byte entry so it
+    // is not trailing (a trailing run of empties is dropped on load).
     let run = || {
         let mut buf = Vec::new();
         rm2k::wire::write_varint64(&mut buf, 0x8_0000_0000 - 600_000).unwrap();
+        buf.extend_from_slice(&[0x01, 0x61]);
         buf
     };
     let first_run = run();
@@ -375,7 +379,7 @@ fn the_entry_budget_is_shared_by_repeated_and_nested_string_lists() {
         let second = <StrList as LcfField>::read(&second_run, &mut nested, "T", 1);
         (first.len(), second.len())
     };
-    assert_eq!(first, 600_000);
+    assert_eq!(first, 600_001);
     assert_eq!(second, 0);
     assert_eq!(sink.as_slice()[0].kind, DiagKind::EntryBudgetExhausted);
 }

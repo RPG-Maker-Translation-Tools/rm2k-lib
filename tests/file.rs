@@ -5,7 +5,7 @@ use rm2k::{
     diag::{DiagKind, Diagnostic},
     file::{
         load_database, load_database_with, load_map, load_save, load_tree_map, load_tree_map_with, save_database,
-        save_map, save_tree_map,
+        save_map, save_save, save_tree_map,
     },
     rpg::{Database, Map, TreeMap},
     wire,
@@ -134,4 +134,24 @@ fn to_vec_collects_exactly_what_the_save_writes() {
 
     let via = rm2k::file::to_vec(|out| save_database(&db, out, Engine::R2K, SaveOpt::default(), b""));
     assert_eq!(via, direct);
+}
+
+#[test]
+fn a_str_list_payload_of_one_empty_entry_is_stable_across_save() {
+    // `SaveSystem` (chunk 0x65) holding `maniac_strings` (0x24) with the one-byte payload `[0]`: a single
+    // zero-length entry. It must not come back as a zero-length chunk that the next load drops.
+    let mut buf = vec![11u8];
+    buf.extend_from_slice(b"LcfSaveData");
+    buf.extend_from_slice(&[0x65, 3, 0x24, 1, 0]);
+
+    let opt = SaveOpt { preserve_header: true };
+    let loaded = load_save(&buf).unwrap();
+    assert!(loaded.value.system.maniac_strings.is_empty());
+
+    let mut first = Vec::new();
+    save_save(&loaded.value, &mut first, Engine::R2K, opt, loaded.header).unwrap();
+    let reloaded = load_save(&first).unwrap();
+    let mut second = Vec::new();
+    save_save(&reloaded.value, &mut second, Engine::R2K, opt, reloaded.header).unwrap();
+    assert_eq!(first, second);
 }

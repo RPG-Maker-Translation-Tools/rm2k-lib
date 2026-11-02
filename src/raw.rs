@@ -530,6 +530,12 @@ impl<'a> LcfField<'a> for StrList<'a> {
             out.push(DbStr::from_bytes(bytes));
         }
 
+        // The writer drops a trailing run of empties, so keep the loaded value in that same form. Otherwise
+        // a payload like `[0]` loads as `[""]`, saves as a zero-length chunk, and reloads as the default.
+        while out.last().is_some_and(DbStr::is_empty) {
+            out.pop();
+        }
+
         Self(out)
     }
 
